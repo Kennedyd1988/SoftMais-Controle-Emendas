@@ -194,6 +194,31 @@ a emenda como pública até remover essa informação.
 
 ## 10. Despesas, Receitas, Dados Bancários e Importação de Planilhas
 
+**Barra de progresso nos uploads** — todo upload de arquivo no app (anexo
+de despesa, de receita, e os documentos gerais da emenda) agora mostra uma
+barra com % em tempo real. Quando o Google Drive está configurado, é
+progresso real de envio pela rede; sem Drive, é o progresso de leitura do
+arquivo no navegador.
+
+**Documentos da emenda (múltiplos arquivos)** — dentro do cadastro de
+cada emenda tem um campo novo, "Documentos anexados", que aceita **vários
+arquivos de uma vez** (edital, convênio, ata, ofício etc.), cada um com sua
+própria barra de progresso. Sem Google Drive configurado, o limite é de
+~650KB no total somando todos os anexos dessa emenda (o documento inteiro
+da emenda tem teto de 1MB no Firestore); com o Drive configurado, não tem
+esse limite. Esses documentos aparecem automaticamente no **Portal de
+Transparência**, na seção "Documentos da emenda", sempre que a emenda
+estiver marcada como pública.
+
+**Formatação da dotação orçamentária** — o campo agora sempre normaliza
+pro padrão oficial `99.999.9999.9999.9999` (2+3+4+4+4 dígitos), tanto
+quando você digita manualmente (formata ao sair do campo) quanto na
+importação por planilha — mesmo que a fonte de dados original venha com
+pontuação diferente (alguns sistemas contábeis exportam os mesmos 17
+dígitos agrupados de outro jeito, tipo `15.451.000.712.500.000`). Se o
+valor não tiver exatamente 17 dígitos, o app mantém como veio, sem tentar
+adivinhar o formato.
+
 **Dados bancários** — cada emenda tem um bloco de banco/agência/conta/tipo
 de conta, referente à conta usada para receber e executar o recurso.
 

@@ -517,7 +517,7 @@ function novaEmendaVazia() {
     localidadeBeneficiada: '', beneficiarioFinal: '', prazoEstimadoImplementacao: '',
     dadosBancarios: { banco: '', agencia: '', conta: '', tipoConta: '' },
     metas: [],
-    cronogramaFisicoFinanceiro: [], instrumentosVinculados: [],
+    cronogramaFisicoFinanceiro: [], instrumentosVinculados: [], anexos: [],
     resumoExecucao: { totalEmpenhado: 0, totalLiquidado: 0, totalPago: 0, totalReceita: 0, percFisicoAtual: 0, percFinanceiroAtual: 0, qtdDespesas: 0, qtdReceitas: 0, qtdComDocumento: 0, metas: [] },
     status: 'cadastrada', publicoTransparencia: false
   };
@@ -548,7 +548,7 @@ async function abrirEmenda(id) {
   const editavel = podeEditar();
   ['fEsfera', 'fExercicio', 'fNumeroEmenda', 'fAutorEmenda', 'fPartidoUnidade', 'fObjeto', 'fValorTotal',
     'fAtoNormativo', 'fOrgaoExecutor', 'fLocalidade', 'fBeneficiarioFinal', 'fPrazoEstimado', 'fPublico',
-    'fBancoNome', 'fBancoAgencia', 'fBancoConta', 'fBancoTipoConta'].forEach(id => $(id).disabled = !editavel);
+    'fBancoNome', 'fBancoAgencia', 'fBancoConta', 'fBancoTipoConta', 'fAnexosArquivo'].forEach(id => $(id).disabled = !editavel);
   $('btnSalvarEmenda').style.display = editavel ? '' : 'none';
   mostrarTela('emendaForm');
 }
@@ -556,6 +556,9 @@ $('btnVoltarEmendas').addEventListener('click', () => mostrarTela('emendas'));
 
 function preencherFormEmenda() {
   const e = state.emendaEmEdicao;
+  $('fAnexosHint').textContent = (state.enteDados.googleDrive && state.enteDados.googleDrive.clientId)
+    ? 'Pode selecionar vários arquivos de uma vez — vão direto pro Google Drive configurado (sem limite de 650KB).'
+    : 'Pode selecionar vários arquivos de uma vez — limite de ~650KB no total (sem Google Drive configurado para o ente).';
   $('fEsfera').value = e.esfera; $('fExercicio').value = e.exercicio; $('fNumeroEmenda').value = e.numeroEmenda;
   $('fAutorEmenda').value = e.autorEmenda; $('fPartidoUnidade').value = e.partidoUnidade;
   $('fObjeto').value = e.objeto; $('fValorTotal').value = e.valorTotal || '';
@@ -566,7 +569,7 @@ function preencherFormEmenda() {
   $('fBancoNome').value = banco.banco || ''; $('fBancoAgencia').value = banco.agencia || '';
   $('fBancoConta').value = banco.conta || ''; $('fBancoTipoConta').value = banco.tipoConta || '';
   $('fPublico').checked = !!e.publicoTransparencia;
-  renderCronograma(); renderInstrumentos(); renderMetas();
+  renderCronograma(); renderInstrumentos(); renderMetas(); renderAnexosEmenda();
   if (state.editandoEmendaId) renderChecklistEmenda();
 }
 function lerFormParaEmenda() {
@@ -604,6 +607,61 @@ function renderMetas() {
 $('btnAddMeta').addEventListener('click', () => {
   (state.emendaEmEdicao.metas ||= []).push({ id: idCurto(), descricao: '', quantidadePrevista: 0, unidade: '' });
   renderMetas();
+});
+
+// ---- documentos anexados à emenda (múltiplos arquivos) ----
+function renderAnexosEmenda() {
+  const lista = state.emendaEmEdicao.anexos || [];
+  $('fAnexosLista').innerHTML = lista.length ? lista.map((a, i) => `
+    <div class="anexos-lista-item">
+      <span>📎 ${a.nome} ${a.tamanho ? `(${Math.round(a.tamanho / 1024)}KB)` : ''}</span>
+      <button class="btn btn-sm btn-danger" type="button" data-anexo-rm="${i}">Remover</button>
+    </div>`).join('') : '';
+  document.querySelectorAll('[data-anexo-rm]').forEach(b => b.addEventListener('click', () => {
+    lista.splice(Number(b.dataset.anexoRm), 1);
+    renderAnexosEmenda();
+  }));
+}
+// Soma o tamanho dos anexos já salvos como base64 nesta emenda — usado pra
+// não deixar o documento inteiro estourar o limite de 1MB do Firestore
+// quando o ente não tem Google Drive configurado.
+function tamanhoTotalAnexosBase64() {
+  return (state.emendaEmEdicao.anexos || []).reduce((s, a) => s + (a.arquivo ? (a.tamanho || 0) : 0), 0);
+}
+$('fAnexosArquivo').addEventListener('change', async (e) => {
+  const arquivos = [...e.target.files];
+  if (!arquivos.length) return;
+  const usaDrive = !!(state.enteDados.googleDrive && state.enteDados.googleDrive.clientId);
+  for (const [i, arquivo] of arquivos.entries()) {
+    if (!usaDrive && (tamanhoTotalAnexosBase64() + arquivo.size) > 650 * 1024) {
+      toast(`"${arquivo.name}" não coube no limite de anexos sem Google Drive (~650KB no total). Configure o Drive em Dados do Ente pra anexar mais.`, true);
+      continue;
+    }
+    const linhaId = `fAnexoProgresso-${i}-${Date.now()}`;
+    $('fAnexosProgresso').insertAdjacentHTML('beforeend', `
+      <div class="upload-progress active upload-progress-item" id="${linhaId}">
+        <div class="upload-progress-row"><span>${arquivo.name}</span><span class="pct">0%</span></div>
+        <div class="upload-progress-track"><div class="upload-progress-fill" style="width:0%;"></div></div>
+      </div>`);
+    const linha = document.getElementById(linhaId);
+    try {
+      const resultado = await processarAnexo(arquivo, (pct) => {
+        linha.querySelector('.pct').textContent = pct + '%';
+        linha.querySelector('.upload-progress-fill').style.width = pct + '%';
+      });
+      (state.emendaEmEdicao.anexos ||= []).push({
+        id: idCurto(), nome: arquivo.name, tamanho: arquivo.size, tipo: arquivo.type,
+        arquivo: resultado.documentoComprobatorioArquivo || null,
+        driveLink: resultado.documentoDriveLink || null, driveNome: resultado.documentoDriveNome || null
+      });
+      renderAnexosEmenda();
+    } catch (err) {
+      toast(`Erro ao anexar "${arquivo.name}": ${err.message}`, true);
+    } finally {
+      linha.remove();
+    }
+  }
+  $('fAnexosArquivo').value = '';
 });
 
 // ---- cronograma físico-financeiro (lista dinâmica) ----
@@ -829,6 +887,7 @@ function excluirReceita(id) {
 }
 
 // ---- modal Nova Despesa ----
+$('dpDotacao').addEventListener('blur', () => { $('dpDotacao').value = formatarDotacao($('dpDotacao').value); });
 function abrirDespesa(id) {
   state.editandoDespesaId = id;
   const emenda = state.emendas.find(e => e.id === state.editandoEmendaId) || {};
@@ -866,6 +925,21 @@ function abrirDespesa(id) {
   $('modalDespesa').classList.add('active');
 }
 $('btnNovaDespesa').addEventListener('click', () => abrirDespesa(null));
+// ---- Helper genérico de barra de progresso de upload (usado em vários formulários) ----
+function progressoMostrar(prefixo, nomeArquivo) {
+  $(prefixo + 'UploadProgress').classList.add('active');
+  $(prefixo + 'UploadNome').textContent = nomeArquivo;
+  $(prefixo + 'UploadPct').textContent = '0%';
+  $(prefixo + 'UploadFill').style.width = '0%';
+}
+function progressoAtualizar(prefixo, pct) {
+  $(prefixo + 'UploadPct').textContent = pct + '%';
+  $(prefixo + 'UploadFill').style.width = pct + '%';
+}
+function progressoEsconder(prefixo) {
+  $(prefixo + 'UploadProgress').classList.remove('active');
+}
+
 $('btnCancelarDespesa').addEventListener('click', () => $('modalDespesa').classList.remove('active'));
 $('btnSalvarDespesa').addEventListener('click', async () => {
   const numeroEmpenho = $('dpEmpenho').value.trim(), credorNome = $('dpCredorNome').value.trim();
@@ -874,7 +948,13 @@ $('btnSalvarDespesa').addEventListener('click', async () => {
   const btn = $('btnSalvarDespesa'); btn.disabled = true;
   try {
     const arquivo = $('dpArquivo').files[0];
-    const anexo = arquivo ? await processarAnexo(arquivo) : null; // null = manter anexo já existente (edição)
+    let anexo = null; // null = manter anexo já existente (edição)
+    if (arquivo) {
+      progressoMostrar('dp', arquivo.name);
+      try {
+        anexo = await processarAnexo(arquivo, (pct) => progressoAtualizar('dp', pct));
+      } finally { progressoEsconder('dp'); }
+    }
     const metasVinculadas = [];
     document.querySelectorAll('[data-meta-vinc]').forEach(el => {
       const q = Number(el.value) || 0;
@@ -885,7 +965,7 @@ $('btnSalvarDespesa').addEventListener('click', async () => {
     const notaFiscal = $('dpNotaFiscal').value.trim();
     const payload = {
       numeroEmpenho, parcela, credorNome, credorCnpj: $('dpCredorCnpj').value.trim(),
-      dotacaoOrcamentaria: $('dpDotacao').value.trim(), elementoDespesa: $('dpElemento').value.trim(),
+      dotacaoOrcamentaria: formatarDotacao($('dpDotacao').value), elementoDespesa: $('dpElemento').value.trim(),
       unidadeOrcamentariaNome: $('dpUnidadeNome').value.trim(), unidadeOrcamentariaCodigo: $('dpUnidadeCodigo').value.trim(),
       contaBancaria: $('dpContaBancaria').value.trim(), ordemPagamento: $('dpOrdemPagamento').value.trim(),
       valorEmpenho, valorPago: Number($('dpValorPago').value) || 0, dataPagamento: $('dpDataPagamento').value,
@@ -919,14 +999,28 @@ $('btnSalvarDespesa').addEventListener('click', async () => {
 function chaveDespesa({ numeroEmpenho, parcela, notaFiscal }) {
   return `${(numeroEmpenho || '').trim()}|${(parcela || '').trim()}|${(notaFiscal || '').trim()}`.toLowerCase();
 }
+// Reagrupa a dotação orçamentária no padrão oficial 99.999.9999.9999.9999
+// (órgão.função.subfunção.programa.ação — 2+3+4+4+4 = 17 dígitos). Muitos
+// sistemas de origem exportam os mesmos dígitos com pontuação diferente
+// (ex: "15.451.000.712.500.000"); aqui a gente ignora a pontuação de
+// origem e reagrupa do zero a partir só dos dígitos.
+function formatarDotacao(v) {
+  const digitos = String(v || '').replace(/\D/g, '');
+  if (digitos.length !== 17) return (v || '').trim(); // formato fora do padrão esperado — mantém como veio
+  return `${digitos.slice(0, 2)}.${digitos.slice(2, 5)}.${digitos.slice(5, 9)}.${digitos.slice(9, 13)}.${digitos.slice(13, 17)}`;
+}
 // Lê um arquivo pequeno (comprovante) como base64 direto no navegador — sem
 // Storage pago, mesma lógica usada pra logos no app da igreja. Limite baixo
 // porque o documento inteiro da despesa tem teto de 1MB no Firestore.
-function lerArquivoComoBase64(file) {
+// onProgress(pct) é opcional e recebe 0-100 conforme a leitura avança.
+function lerArquivoComoBase64(file, onProgress) {
   return new Promise((resolve, reject) => {
     if (file.size > 600 * 1024) { reject(new Error('Arquivo maior que 600KB — reduza o tamanho (ex: comprima o PDF/foto), ou configure o Google Drive em Dados do Ente pra anexar arquivos maiores.')); return; }
     const reader = new FileReader();
-    reader.onload = () => resolve(reader.result);
+    if (onProgress) {
+      reader.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)); };
+    }
+    reader.onload = () => { if (onProgress) onProgress(100); resolve(reader.result); };
     reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
     reader.readAsDataURL(file);
   });
@@ -955,7 +1049,13 @@ $('btnSalvarReceita').addEventListener('click', async () => {
   const btn = $('btnSalvarReceita'); btn.disabled = true;
   try {
     const arquivo = $('rcArquivo').files[0];
-    const anexo = arquivo ? await processarAnexo(arquivo) : null;
+    let anexo = null;
+    if (arquivo) {
+      progressoMostrar('rc', arquivo.name);
+      try {
+        anexo = await processarAnexo(arquivo, (pct) => progressoAtualizar('rc', pct));
+      } finally { progressoEsconder('rc'); }
+    }
     const emenda = state.emendas.find(e => e.id === state.editandoEmendaId);
     const payload = {
       data, valor, contaBancaria: $('rcContaBancaria').value.trim(), origem: $('rcOrigem').value.trim(),
@@ -1118,7 +1218,7 @@ $('dpImportarArquivo').addEventListener('change', async (e) => {
       try {
         await addDoc(collection(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'despesas'), {
           numeroEmpenho, parcela, credorNome: String(linha.NOME || '').trim(), credorCnpj: String(linha.CNPJFORNECEDOR || '').trim(),
-          dotacaoOrcamentaria: String(linha.CFPRO || '').trim(), elementoDespesa: String(linha.CATEC || '').trim(),
+          dotacaoOrcamentaria: formatarDotacao(linha.CFPRO), elementoDespesa: String(linha.CATEC || '').trim(),
           unidadeOrcamentariaNome: String(linha.UNIDADENOME || '').trim(), unidadeOrcamentariaCodigo: String(linha.UNIDADE || '').trim(),
           contaBancaria: String(linha.CONTAC || '').trim(), ordemPagamento: String(linha.ORDPG || '').trim(),
           valorEmpenho: parseValorBR(linha.VALOREMPENHO), valorPago: parseValorBR(linha.VAPAG),
@@ -1533,18 +1633,27 @@ async function obterTokenGoogleDrive(clientId) {
     } catch (e) { reject(new Error('Client ID do Google inválido ou domínio não autorizado.')); }
   });
 }
-async function enviarParaGoogleDrive(file, clientId, folderId) {
+async function enviarParaGoogleDrive(file, clientId, folderId, onProgress) {
   const token = await obterTokenGoogleDrive(clientId);
   const metadata = { name: file.name };
   if (folderId) metadata.parents = [folderId];
   const form = new FormData();
   form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
   form.append('file', file);
-  const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,name', {
-    method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: form
+  // Usamos XMLHttpRequest (não fetch) porque só ele expõe progresso real de
+  // ENVIO (upload.onprogress) — o fetch só reporta progresso de download.
+  const data = await new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,name');
+    xhr.setRequestHeader('Authorization', 'Bearer ' + token);
+    if (onProgress) xhr.upload.onprogress = (e) => { if (e.lengthComputable) onProgress(Math.round((e.loaded / e.total) * 100)); };
+    xhr.onload = () => {
+      if (xhr.status >= 200 && xhr.status < 300) { resolve(JSON.parse(xhr.responseText)); }
+      else { reject(new Error('Falha ao enviar o arquivo para o Google Drive (verifique a pasta e as permissões).')); }
+    };
+    xhr.onerror = () => reject(new Error('Falha de conexão ao enviar para o Google Drive.'));
+    xhr.send(form);
   });
-  if (!resp.ok) throw new Error('Falha ao enviar o arquivo para o Google Drive (verifique a pasta e as permissões).');
-  const data = await resp.json();
   // Torna o arquivo legível por link — necessário pra aparecer no Portal
   // Público sem exigir login de quem está consultando.
   try {
@@ -1557,14 +1666,15 @@ async function enviarParaGoogleDrive(file, clientId, folderId) {
 }
 // Escolhe automaticamente Drive (se o ente configurou) ou base64 (padrão).
 // Devolve sempre o mesmo formato de campos pra gravar no documento.
-async function processarAnexo(file) {
+// onProgress(pct) é opcional — recebe 0-100 conforme o envio/leitura avança.
+async function processarAnexo(file, onProgress) {
   if (!file) return { documentoComprobatorioArquivo: null, documentoComprobatorioNome: null, documentoComprobatorioTipo: null, documentoDriveLink: null, documentoDriveNome: null };
   const drive = state.enteDados.googleDrive;
   if (drive && drive.clientId) {
-    const { link, nome } = await enviarParaGoogleDrive(file, drive.clientId, drive.folderId);
+    const { link, nome } = await enviarParaGoogleDrive(file, drive.clientId, drive.folderId, onProgress);
     return { documentoComprobatorioArquivo: null, documentoComprobatorioNome: null, documentoComprobatorioTipo: null, documentoDriveLink: link, documentoDriveNome: nome };
   }
-  const base64 = await lerArquivoComoBase64(file);
+  const base64 = await lerArquivoComoBase64(file, onProgress);
   return { documentoComprobatorioArquivo: base64, documentoComprobatorioNome: file.name, documentoComprobatorioTipo: file.type, documentoDriveLink: null, documentoDriveNome: null };
 }
 
@@ -1678,6 +1788,15 @@ async function initPortalPublico(enteId) {
             <div class="conf-bar-track"><div class="conf-bar-fill" style="width:${Math.min(100, m.percentual || 0)}%; background:var(--cyan);"></div></div>
           </div>`).join('') + `</div>`;
     };
+    const anexosHtml = (e) => {
+      const lista = e.anexos || [];
+      if (!lista.length) return '';
+      return `<div class="publico-metas"><div class="publico-bar-label"><strong>Documentos da emenda</strong></div>` +
+        lista.map(a => a.arquivo
+          ? `<div style="margin-bottom:4px;"><a class="fin-doc-link" href="${a.arquivo}" download="${a.nome}">📎 ${a.nome}</a></div>`
+          : (a.driveLink ? `<div style="margin-bottom:4px;"><a class="fin-doc-link" href="${a.driveLink}" target="_blank" rel="noopener">📎 ${a.driveNome || a.nome}</a></div>` : '')
+        ).join('') + `</div>`;
+    };
     $('portalLista').innerHTML = lista.length ? lista.map(e => {
       const pFisico = Math.min(100, r(e).percFisicoAtual || 0), pFinanceiro = Math.min(100, r(e).percFinanceiroAtual || 0);
       return `
@@ -1720,6 +1839,7 @@ async function initPortalPublico(enteId) {
           <div><dt>Pago</dt><dd>${fmtBRL(r(e).totalPago)}</dd></div>
         </dl>
         ${metasHtml(e)}
+        ${anexosHtml(e)}
         <button class="btn btn-sm" style="margin-top:14px;" data-ver-exec="${e.id}">Ver despesas, receitas e documentos</button>
         <div id="portalExec-${e.id}" style="margin-top:10px;"></div>
       </div>`;

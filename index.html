@@ -165,6 +165,18 @@
   .conf-bar-track{height:8px; background:var(--surface-2); border-radius:99px; overflow:hidden; margin-top:8px;}
   .conf-bar-fill{height:100%; background:var(--green); border-radius:99px;}
 
+  .upload-progress{margin-top:8px; padding:8px 10px; background:var(--surface-2); border-radius:8px; display:none;}
+  .upload-progress.active{display:block;}
+  .upload-progress-row{display:flex; justify-content:space-between; font-size:11.5px; color:var(--text-dim); margin-bottom:4px; gap:8px;}
+  .upload-progress-row span:first-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap; flex:1;}
+  .upload-progress-track{height:6px; background:var(--line); border-radius:99px; overflow:hidden;}
+  .upload-progress-fill{height:100%; background:var(--brand); border-radius:99px; width:0%; transition:width .15s;}
+  .upload-progress-item{margin-bottom:8px;}
+  .upload-progress-item:last-child{margin-bottom:0;}
+
+  .anexos-lista-item{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:8px 10px; background:var(--surface-2); border-radius:8px; margin-bottom:6px; font-size:12.5px;}
+  .anexos-lista-item span:first-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+
   .cronograma-row, .instrumento-row{display:flex; gap:8px; margin-bottom:8px; align-items:flex-end;}
   .cronograma-row .field, .instrumento-row .field{flex:1; margin-bottom:0;}
 
@@ -430,6 +442,14 @@
           <label>Instrumentos vinculados (convênio, contrato de repasse, termo de fomento, nº do processo)</label>
           <div id="instrumentosLista"></div>
           <button class="btn btn-sm" id="btnAddInstrumento">+ Adicionar instrumento</button>
+        </div>
+
+        <div class="field">
+          <label>Documentos anexados (edital, convênio, ata, ofício etc.)</label>
+          <input type="file" id="fAnexosArquivo" multiple accept="image/*,application/pdf">
+          <div class="field-hint" id="fAnexosHint">Pode selecionar vários arquivos de uma vez — limite de ~600KB cada quando não há Google Drive configurado para o ente.</div>
+          <div id="fAnexosProgresso"></div>
+          <div id="fAnexosLista" style="margin-top:8px;"></div>
         </div>
 
         <div class="checkbox-row" style="margin-top:10px;">
@@ -743,6 +763,10 @@
       <input type="file" id="dpArquivo" accept="image/*,application/pdf">
       <div class="field-hint" id="dpArquivoHint">Anexado direto no cadastro — limite de ~600KB por arquivo (ou envie para o Google Drive do ente, se configurado em Dados do Ente).</div>
       <div id="dpArquivoAtual" class="field-hint"></div>
+      <div class="upload-progress" id="dpUploadProgress">
+        <div class="upload-progress-row"><span id="dpUploadNome"></span><span id="dpUploadPct">0%</span></div>
+        <div class="upload-progress-track"><div class="upload-progress-fill" id="dpUploadFill"></div></div>
+      </div>
     </div>
     <div class="field"><label>Observações</label><textarea id="dpObs"></textarea></div>
     <div class="modal-actions">
@@ -765,6 +789,10 @@
     <div class="field"><label>Documento comprobatório</label>
       <input type="file" id="rcArquivo" accept="image/*,application/pdf">
       <div class="field-hint" id="rcArquivoHint">Anexado direto no cadastro — limite de ~600KB por arquivo.</div>
+      <div class="upload-progress" id="rcUploadProgress">
+        <div class="upload-progress-row"><span id="rcUploadNome"></span><span id="rcUploadPct">0%</span></div>
+        <div class="upload-progress-track"><div class="upload-progress-fill" id="rcUploadFill"></div></div>
+      </div>
     </div>
     <div class="field"><label>Observações</label><textarea id="rcObs"></textarea></div>
     <div class="modal-actions">
