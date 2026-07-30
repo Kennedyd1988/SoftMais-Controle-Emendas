@@ -648,6 +648,8 @@ $('fAnexosArquivo').addEventListener('change', async (e) => {
       const resultado = await processarAnexo(arquivo, (pct) => {
         linha.querySelector('.pct').textContent = pct + '%';
         linha.querySelector('.upload-progress-fill').style.width = pct + '%';
+      }, (txt) => {
+        linha.querySelector('.pct').textContent = txt;
       });
       (state.emendaEmEdicao.anexos ||= []).push({
         id: idCurto(), nome: arquivo.name, tamanho: arquivo.size, tipo: arquivo.type,
@@ -936,6 +938,9 @@ function progressoAtualizar(prefixo, pct) {
   $(prefixo + 'UploadPct').textContent = pct + '%';
   $(prefixo + 'UploadFill').style.width = pct + '%';
 }
+function progressoStatus(prefixo, texto) {
+  $(prefixo + 'UploadPct').textContent = texto;
+}
 function progressoEsconder(prefixo) {
   $(prefixo + 'UploadProgress').classList.remove('active');
 }
@@ -952,7 +957,7 @@ $('btnSalvarDespesa').addEventListener('click', async () => {
     if (arquivo) {
       progressoMostrar('dp', arquivo.name);
       try {
-        anexo = await processarAnexo(arquivo, (pct) => progressoAtualizar('dp', pct));
+        anexo = await processarAnexo(arquivo, (pct) => progressoAtualizar('dp', pct), (txt) => progressoStatus('dp', txt));
       } finally { progressoEsconder('dp'); }
     }
     const metasVinculadas = [];
@@ -1053,7 +1058,7 @@ $('btnSalvarReceita').addEventListener('click', async () => {
     if (arquivo) {
       progressoMostrar('rc', arquivo.name);
       try {
-        anexo = await processarAnexo(arquivo, (pct) => progressoAtualizar('rc', pct));
+        anexo = await processarAnexo(arquivo, (pct) => progressoAtualizar('rc', pct), (txt) => progressoStatus('rc', txt));
       } finally { progressoEsconder('rc'); }
     }
     const emenda = state.emendas.find(e => e.id === state.editandoEmendaId);
@@ -1616,25 +1621,39 @@ function carregarGis() {
     document.head.appendChild(s);
   });
 }
-async function obterTokenGoogleDrive(clientId) {
+async function obterTokenGoogleDrive(clientId, onStatus) {
   await carregarGis();
+  if (onStatus) onStatus('Aguardando autorização do Google (verifique se abriu um popup — pode estar bloqueado ou atrás da janela)...');
   return new Promise((resolve, reject) => {
+    let concluiu = false;
+    const tempoLimite = setTimeout(() => {
+      if (concluiu) return;
+      concluiu = true;
+      reject(new Error('O Google não respondeu em 90 segundos — o popup de login provavelmente foi bloqueado pelo navegador. Libere popups para este site e tente de novo.'));
+    }, 90000);
     try {
       googleTokenClient = google.accounts.oauth2.initTokenClient({
         client_id: clientId,
         scope: 'https://www.googleapis.com/auth/drive.file',
         callback: (resp) => {
+          if (concluiu) return;
+          concluiu = true;
+          clearTimeout(tempoLimite);
           if (resp.error) { reject(new Error('Autorização do Google negada ou cancelada.')); return; }
           googleAccessToken = resp.access_token;
           resolve(resp.access_token);
         }
       });
       googleTokenClient.requestAccessToken({ prompt: googleAccessToken ? '' : 'consent' });
-    } catch (e) { reject(new Error('Client ID do Google inválido ou domínio não autorizado.')); }
+    } catch (e) {
+      clearTimeout(tempoLimite);
+      reject(new Error('Client ID do Google inválido ou domínio não autorizado.'));
+    }
   });
 }
-async function enviarParaGoogleDrive(file, clientId, folderId, onProgress) {
-  const token = await obterTokenGoogleDrive(clientId);
+async function enviarParaGoogleDrive(file, clientId, folderId, onProgress, onStatus) {
+  const token = await obterTokenGoogleDrive(clientId, onStatus);
+  if (onStatus) onStatus('Enviando...');
   const metadata = { name: file.name };
   if (folderId) metadata.parents = [folderId];
   const form = new FormData();
@@ -1667,11 +1686,11 @@ async function enviarParaGoogleDrive(file, clientId, folderId, onProgress) {
 // Escolhe automaticamente Drive (se o ente configurou) ou base64 (padrão).
 // Devolve sempre o mesmo formato de campos pra gravar no documento.
 // onProgress(pct) é opcional — recebe 0-100 conforme o envio/leitura avança.
-async function processarAnexo(file, onProgress) {
+async function processarAnexo(file, onProgress, onStatus) {
   if (!file) return { documentoComprobatorioArquivo: null, documentoComprobatorioNome: null, documentoComprobatorioTipo: null, documentoDriveLink: null, documentoDriveNome: null };
   const drive = state.enteDados.googleDrive;
   if (drive && drive.clientId) {
-    const { link, nome } = await enviarParaGoogleDrive(file, drive.clientId, drive.folderId, onProgress);
+    const { link, nome } = await enviarParaGoogleDrive(file, drive.clientId, drive.folderId, onProgress, onStatus);
     return { documentoComprobatorioArquivo: null, documentoComprobatorioNome: null, documentoComprobatorioTipo: null, documentoDriveLink: link, documentoDriveNome: nome };
   }
   const base64 = await lerArquivoComoBase64(file, onProgress);
