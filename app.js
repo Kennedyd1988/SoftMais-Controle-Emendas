@@ -724,6 +724,11 @@ async function carregarReceitas(emendaId) {
   renderReceitas();
 }
 function statusDespesa(x) { return (x.valorPago > 0) ? 'Liquidada/Paga' : 'Empenhada'; }
+function linkDocumento(x) {
+  if (x.documentoComprobatorioArquivo) return `<a class="fin-doc-link" href="${x.documentoComprobatorioArquivo}" download="${x.documentoComprobatorioNome || 'comprovante'}">📎 ${x.documentoComprobatorioNome || 'Ver comprovante'}</a>`;
+  if (x.documentoDriveLink) return `<a class="fin-doc-link" href="${x.documentoDriveLink}" target="_blank" rel="noopener">📎 ${x.documentoDriveNome || 'Ver no Google Drive'}</a>`;
+  return `<span class="fin-doc-empty">Sem documento anexado</span>`;
+}
 function renderDespesas() {
   const editavel = podeEditar();
   const emenda = state.emendas.find(e => e.id === state.editandoEmendaId) || {};
@@ -733,22 +738,41 @@ function renderDespesas() {
       const m = metasPorId[mv.metaId];
       return `Meta "${m ? m.descricao : mv.metaId}": +${mv.quantidade} ${m ? m.unidade || '' : ''}`;
     }).join(' · ');
-    return `<div class="exec-item">
-      <div class="exec-item-head">
-        <strong>Empenho ${x.numeroEmpenho || '—'} — ${x.credorNome || 'sem credor'}</strong>
-        <span class="badge ${x.valorPago > 0 ? 'badge-green' : 'badge-amber'}">${statusDespesa(x)}</span>
+    return `<div class="fin-card">
+      <div class="fin-card-head">
+        <div>
+          <div class="fin-card-title">Empenho ${x.numeroEmpenho || '—'} — ${x.credorNome || 'sem credor'}</div>
+          <div class="fin-card-sub">${x.credorCnpj || ''}</div>
+        </div>
+        <div>
+          <div class="fin-card-value">${fmtBRL(x.valorPago || x.valorEmpenho)}</div>
+          <div class="fin-card-date">${x.dataPagamento ? new Date(x.dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</div>
+        </div>
       </div>
-      <div class="screen-sub">Empenhado: ${fmtBRL(x.valorEmpenho)} · Liquidado/Pago: ${fmtBRL(x.valorPago)} ${x.dataPagamento ? '· ' + new Date(x.dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</div>
-      ${x.historico ? `<div class="screen-sub">${x.historico}</div>` : ''}
-      ${metasTxt ? `<div class="screen-sub">${metasTxt}</div>` : ''}
-      ${x.documentoComprobatorioArquivo ? `<div class="screen-sub"><a href="${x.documentoComprobatorioArquivo}" download="${x.documentoComprobatorioNome || 'comprovante'}">📎 ${x.documentoComprobatorioNome || 'Ver comprovante'}</a></div>` : ''}
-      ${x.documentoDriveLink ? `<div class="screen-sub"><a href="${x.documentoDriveLink}" target="_blank" rel="noopener">📎 ${x.documentoDriveNome || 'Ver no Google Drive'}</a></div>` : ''}
-      ${x.observacoes ? `<div class="screen-sub">${x.observacoes}</div>` : ''}
-      <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
-        <span class="badge ${x.validadoPorControleInterno ? 'badge-green' : 'badge-amber'}">${x.validadoPorControleInterno ? 'Validado pelo Controle Interno' : 'Aguardando validação'}</span>
-        ${papelAtual() === 'controleInterno' && !x.validadoPorControleInterno ? `<button class="btn btn-sm" data-validar-despesa="${x.id}">Validar</button>` : ''}
-        ${editavel ? `<button class="btn btn-sm" data-editar-despesa="${x.id}" style="margin-left:auto;">Editar</button>` : ''}
-        ${editavel ? `<button class="btn btn-sm btn-danger" data-rm-despesa="${x.id}">Excluir</button>` : ''}
+      <span class="badge ${x.valorPago > 0 ? 'badge-green' : 'badge-amber'}" style="margin-top:4px; display:inline-block;">${statusDespesa(x)}</span>
+      <dl class="fin-card-grid">
+        <div><dt>Empenhado</dt><dd>${fmtBRL(x.valorEmpenho)}</dd></div>
+        <div><dt>Liquidado/Pago</dt><dd>${fmtBRL(x.valorPago)}</dd></div>
+        <div><dt>Nota fiscal</dt><dd>${x.notaFiscal || '—'}</dd></div>
+        <div><dt>Contrato</dt><dd>${x.contrato || '—'}</dd></div>
+        <div><dt>Dotação</dt><dd>${x.dotacaoOrcamentaria || '—'}</dd></div>
+        <div><dt>Elemento</dt><dd>${x.elementoDespesa || '—'}</dd></div>
+        <div><dt>Unidade</dt><dd>${x.unidadeOrcamentariaNome || '—'}</dd></div>
+        <div><dt>Licitação</dt><dd>${x.licitacaoModalidade || '—'}${x.processoLicitatorio ? ' (' + x.processoLicitatorio + ')' : ''}</dd></div>
+      </dl>
+      ${x.historico ? `<div class="fin-card-hist">${x.historico}</div>` : ''}
+      ${metasTxt ? `<div class="screen-sub" style="margin-bottom:6px;">${metasTxt}</div>` : ''}
+      ${x.observacoes ? `<div class="screen-sub" style="margin-bottom:6px;">${x.observacoes}</div>` : ''}
+      <div class="fin-card-foot">
+        <div style="display:flex; gap:10px; align-items:center;">
+          ${linkDocumento(x)}
+          <span class="badge ${x.validadoPorControleInterno ? 'badge-green' : 'badge-amber'}">${x.validadoPorControleInterno ? 'Validado' : 'Aguardando validação'}</span>
+        </div>
+        <div style="display:flex; gap:8px;">
+          ${papelAtual() === 'controleInterno' && !x.validadoPorControleInterno ? `<button class="btn btn-sm" data-validar-despesa="${x.id}">Validar</button>` : ''}
+          ${editavel ? `<button class="btn btn-sm" data-editar-despesa="${x.id}">Editar</button>` : ''}
+          ${editavel ? `<button class="btn btn-sm btn-danger" data-rm-despesa="${x.id}">Excluir</button>` : ''}
+        </div>
       </div>
     </div>`;
   }).join('') : '<div class="empty-state">Nenhuma despesa lançada ainda.</div>';
@@ -759,17 +783,23 @@ function renderDespesas() {
 function renderReceitas() {
   const editavel = podeEditar();
   $('receitasLista').innerHTML = state.receitasAtual.length ? state.receitasAtual.map(x => `
-    <div class="exec-item">
-      <div class="exec-item-head">
-        <strong>${fmtBRL(x.valor)}</strong>
-        <span class="screen-sub">${x.data ? new Date(x.data + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</span>
+    <div class="fin-card">
+      <div class="fin-card-head">
+        <div>
+          <div class="fin-card-title">Receita</div>
+          <div class="fin-card-sub">${x.origem || 'Origem não informada'}</div>
+        </div>
+        <div>
+          <div class="fin-card-value">${fmtBRL(x.valor)}</div>
+          <div class="fin-card-date">${x.data ? new Date(x.data + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</div>
+        </div>
       </div>
-      ${x.contaBancaria ? `<div class="screen-sub">Conta: ${x.contaBancaria}</div>` : ''}
-      ${x.origem ? `<div class="screen-sub">Origem: ${x.origem}</div>` : ''}
-      ${x.documentoComprobatorioArquivo ? `<div class="screen-sub"><a href="${x.documentoComprobatorioArquivo}" download="${x.documentoComprobatorioNome || 'comprovante'}">📎 ${x.documentoComprobatorioNome || 'Ver comprovante'}</a></div>` : ''}
-      ${x.documentoDriveLink ? `<div class="screen-sub"><a href="${x.documentoDriveLink}" target="_blank" rel="noopener">📎 ${x.documentoDriveNome || 'Ver no Google Drive'}</a></div>` : ''}
-      ${x.observacoes ? `<div class="screen-sub">${x.observacoes}</div>` : ''}
-      ${editavel ? `<div style="margin-top:8px; display:flex; gap:8px;"><button class="btn btn-sm" data-editar-receita="${x.id}">Editar</button><button class="btn btn-sm btn-danger" data-rm-receita="${x.id}">Excluir</button></div>` : ''}
+      ${x.contaBancaria ? `<dl class="fin-card-grid"><div><dt>Conta bancária</dt><dd>${x.contaBancaria}</dd></div></dl>` : ''}
+      ${x.observacoes ? `<div class="screen-sub" style="margin-bottom:6px;">${x.observacoes}</div>` : ''}
+      <div class="fin-card-foot">
+        ${linkDocumento(x)}
+        ${editavel ? `<div style="display:flex; gap:8px;"><button class="btn btn-sm" data-editar-receita="${x.id}">Editar</button><button class="btn btn-sm btn-danger" data-rm-receita="${x.id}">Excluir</button></div>` : ''}
+      </div>
     </div>`).join('') : '<div class="empty-state">Nenhuma receita lançada ainda.</div>';
   document.querySelectorAll('[data-editar-receita]').forEach(b => b.addEventListener('click', () => abrirReceita(b.dataset.editarReceita)));
   document.querySelectorAll('[data-rm-receita]').forEach(b => b.addEventListener('click', () => excluirReceita(b.dataset.rmReceita)));
@@ -1637,19 +1667,6 @@ async function initPortalPublico(enteId) {
     });
     const r = (e) => e.resumoExecucao || {};
 
-    // ---- KPIs consolidados ----
-    const totais = lista.reduce((acc, e) => {
-      acc.previsto += e.valorTotal || 0; acc.receita += r(e).totalReceita || 0;
-      acc.empenhado += r(e).totalEmpenhado || 0; acc.liquidado += r(e).totalLiquidado || 0; acc.pago += r(e).totalPago || 0;
-      return acc;
-    }, { previsto: 0, receita: 0, empenhado: 0, liquidado: 0, pago: 0 });
-    $('portalCards').innerHTML = `
-      <div class="card"><div class="kpi-label">Emendas públicas</div><div class="kpi-value">${lista.length}</div></div>
-      <div class="card"><div class="kpi-label">Valor previsto</div><div class="kpi-value" style="font-size:16px;">${fmtBRL(totais.previsto)}</div></div>
-      <div class="card"><div class="kpi-label">Recebido</div><div class="kpi-value" style="font-size:16px;">${fmtBRL(totais.receita)}</div></div>
-      <div class="card"><div class="kpi-label">Empenhado</div><div class="kpi-value" style="font-size:16px;">${fmtBRL(totais.empenhado)}</div></div>
-      <div class="card"><div class="kpi-label">Pago</div><div class="kpi-value" style="font-size:16px;">${fmtBRL(totais.pago)}</div><div class="kpi-sub">${totais.previsto > 0 ? Math.round(totais.pago / totais.previsto * 1000) / 10 : 0}% do previsto</div></div>`;
-
     // ---- Lista de emendas ----
     const metasHtml = (e) => {
       const resumoMetas = (r(e).metas && r(e).metas.length) ? r(e).metas : (e.metas || []).map(m => ({ ...m, quantidadeRealizada: 0, percentual: 0 }));
@@ -1744,26 +1761,44 @@ async function initPortalPublico(enteId) {
       ]);
       const despesas = despSnap.docs.map(d => d.data());
       const receitas = recSnap.docs.map(d => d.data());
-      const linkDoc = (x) => x.documentoComprobatorioArquivo
-        ? `<a href="${x.documentoComprobatorioArquivo}" download="${x.documentoComprobatorioNome || 'comprovante'}">📎 ${x.documentoComprobatorioNome || 'Comprovante'}</a>`
-        : (x.documentoDriveLink ? `<a href="${x.documentoDriveLink}" target="_blank" rel="noopener">📎 ${x.documentoDriveNome || 'Ver no Drive'}</a>` : '<span class="screen-sub">Sem documento anexado</span>');
-      const despesasHtml = despesas.length ? `<h4 style="font-size:12.5px; margin:10px 0 4px;">Despesas</h4>` + despesas.map(x => `
-        <div class="exec-item">
-          <div class="exec-item-head"><strong>Empenho ${x.numeroEmpenho || '—'} — ${x.credorNome || '—'}</strong>
-            <span class="screen-sub">${x.dataPagamento ? new Date(x.dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</span></div>
-          <div class="screen-sub">Empenhado: ${fmtBRL(x.valorEmpenho)} · Liquidado/Pago: ${fmtBRL(x.valorPago)}</div>
-          <div class="screen-sub">CNPJ: ${x.credorCnpj || '—'} · NF: ${x.notaFiscal || '—'} · Contrato: ${x.contrato || '—'}</div>
-          <div class="screen-sub">Dotação: ${x.dotacaoOrcamentaria || '—'} · Elemento: ${x.elementoDespesa || '—'} · Unidade: ${x.unidadeOrcamentariaNome || '—'}</div>
-          <div class="screen-sub">Licitação: ${x.licitacaoModalidade || '—'} (processo ${x.processoLicitatorio || '—'})</div>
-          ${x.historico ? `<div class="screen-sub">${x.historico}</div>` : ''}
-          ${linkDoc(x)}
+      const despesasHtml = despesas.length ? `<h4 class="fin-card-sub" style="text-transform:uppercase; letter-spacing:.04em; margin:14px 0 8px;">Despesas</h4>` + despesas.map(x => `
+        <div class="fin-card">
+          <div class="fin-card-head">
+            <div>
+              <div class="fin-card-title">Empenho ${x.numeroEmpenho || '—'} — ${x.credorNome || '—'}</div>
+              <div class="fin-card-sub">${x.credorCnpj || ''}</div>
+            </div>
+            <div>
+              <div class="fin-card-value">${fmtBRL(x.valorPago || x.valorEmpenho)}</div>
+              <div class="fin-card-date">${x.dataPagamento ? new Date(x.dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</div>
+            </div>
+          </div>
+          <dl class="fin-card-grid">
+            <div><dt>Empenhado</dt><dd>${fmtBRL(x.valorEmpenho)}</dd></div>
+            <div><dt>Liquidado/Pago</dt><dd>${fmtBRL(x.valorPago)}</dd></div>
+            <div><dt>Nota fiscal</dt><dd>${x.notaFiscal || '—'}</dd></div>
+            <div><dt>Contrato</dt><dd>${x.contrato || '—'}</dd></div>
+            <div><dt>Dotação</dt><dd>${x.dotacaoOrcamentaria || '—'}</dd></div>
+            <div><dt>Elemento</dt><dd>${x.elementoDespesa || '—'}</dd></div>
+            <div><dt>Unidade</dt><dd>${x.unidadeOrcamentariaNome || '—'}</dd></div>
+            <div><dt>Licitação</dt><dd>${x.licitacaoModalidade || '—'}${x.processoLicitatorio ? ' (' + x.processoLicitatorio + ')' : ''}</dd></div>
+          </dl>
+          ${x.historico ? `<div class="fin-card-hist">${x.historico}</div>` : ''}
+          <div class="fin-card-foot">${linkDocumento(x)}</div>
         </div>`).join('') : '<div class="empty-state">Nenhuma despesa lançada ainda.</div>';
-      const receitasHtml = receitas.length ? `<h4 style="font-size:12.5px; margin:10px 0 4px;">Receitas</h4>` + receitas.map(x => `
-        <div class="exec-item">
-          <div class="exec-item-head"><strong>${fmtBRL(x.valor)}</strong>
-            <span class="screen-sub">${x.data ? new Date(x.data + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</span></div>
-          ${x.origem ? `<div class="screen-sub">Origem: ${x.origem}</div>` : ''}
-          ${linkDoc(x)}
+      const receitasHtml = receitas.length ? `<h4 class="fin-card-sub" style="text-transform:uppercase; letter-spacing:.04em; margin:14px 0 8px;">Receitas</h4>` + receitas.map(x => `
+        <div class="fin-card">
+          <div class="fin-card-head">
+            <div>
+              <div class="fin-card-title">Receita</div>
+              <div class="fin-card-sub">${x.origem || 'Origem não informada'}</div>
+            </div>
+            <div>
+              <div class="fin-card-value">${fmtBRL(x.valor)}</div>
+              <div class="fin-card-date">${x.data ? new Date(x.data + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</div>
+            </div>
+          </div>
+          <div class="fin-card-foot">${linkDocumento(x)}</div>
         </div>`).join('') : '';
       alvo.innerHTML = despesasHtml + receitasHtml;
       alvo.dataset.carregado = '1';
