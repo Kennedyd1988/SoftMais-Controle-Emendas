@@ -165,9 +165,11 @@ publicar, em vez de tudo ir para o ar automaticamente.
 
 O portal foi redesenhado pra ficar mais organizado e visual:
 - **Cartões de resumo** no topo (quantas emendas públicas, valor previsto,
-  recebido, empenhado, pago), já considerando os filtros aplicados
-- **Gráfico de barras** (Chart.js) comparando previsto × recebido ×
-  empenhado × pago do conjunto filtrado
+  recebido, empenhado, pago), já considerando os filtros aplicados — só
+  números, sem gráfico aqui (a execução físico-financeira faz sentido por
+  emenda, não somada entre emendas diferentes)
+- **Gráfico de barras** (Chart.js) **dentro de cada emenda**, comparando
+  previsto × recebido × empenhado × pago daquela emenda especificamente
 - **Barras de progresso** de execução física e financeira em cada cartão
   de emenda — cor verde quando bate 100%, senão azul/amarelo
 - **Barras de progresso por meta física**, mostrando quanto já foi

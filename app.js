@@ -1609,7 +1609,7 @@ $('btnConfirmarSim').addEventListener('click', async () => {
 // ============================================================
 // PORTAL DE TRANSPARÊNCIA (público, sem login)
 // ============================================================
-let portalChartInstance = null;
+const portalChartInstances = new Map(); // uma instância de gráfico por emenda (destruídas a cada re-render)
 async function initPortalPublico(enteId) {
   const enteSnap = await getDoc(doc(db, 'entes', enteId));
   if (!enteSnap.exists()) { $('portalEnteNome').textContent = 'Ente não encontrado.'; return; }
@@ -1650,27 +1650,6 @@ async function initPortalPublico(enteId) {
       <div class="card"><div class="kpi-label">Empenhado</div><div class="kpi-value" style="font-size:16px;">${fmtBRL(totais.empenhado)}</div></div>
       <div class="card"><div class="kpi-label">Pago</div><div class="kpi-value" style="font-size:16px;">${fmtBRL(totais.pago)}</div><div class="kpi-sub">${totais.previsto > 0 ? Math.round(totais.pago / totais.previsto * 1000) / 10 : 0}% do previsto</div></div>`;
 
-    // ---- Gráfico consolidado (previsto x recebido x empenhado x pago) ----
-    if (portalChartInstance) portalChartInstance.destroy();
-    const ctx = document.getElementById('portalChart');
-    if (ctx && window.Chart) {
-      portalChartInstance = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: ['Previsto', 'Recebido', 'Empenhado', 'Pago'],
-          datasets: [{
-            data: [totais.previsto, totais.receita, totais.empenhado, totais.pago],
-            backgroundColor: ['#93a8bc', '#14b8ee', '#b3790f', '#16875a'],
-            borderRadius: 6, maxBarThickness: 70
-          }]
-        },
-        options: {
-          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmtBRL(c.parsed.y) } } },
-          scales: { y: { ticks: { callback: (v) => fmtBRL(v) } } }
-        }
-      });
-    }
-
     // ---- Lista de emendas ----
     const metasHtml = (e) => {
       const resumoMetas = (r(e).metas && r(e).metas.length) ? r(e).metas : (e.metas || []).map(m => ({ ...m, quantidadeRealizada: 0, percentual: 0 }));
@@ -1706,6 +1685,11 @@ async function initPortalPublico(enteId) {
           </div>
         </div>
 
+        <div class="publico-chart-wrap">
+          <div class="publico-bar-label"><strong>Execução financeira desta emenda</strong></div>
+          <canvas id="portalChartEmenda-${e.id}" height="140"></canvas>
+        </div>
+
         <dl class="publico-grid">
           <div><dt>Autor / Parlamentar</dt><dd>${e.autorEmenda || '—'}</dd></div>
           <div><dt>Partido/Unidade</dt><dd>${e.partidoUnidade || '—'}</dd></div>
@@ -1723,6 +1707,33 @@ async function initPortalPublico(enteId) {
         <div id="portalExec-${e.id}" style="margin-top:10px;"></div>
       </div>`;
     }).join('') : '<div class="empty-state">Nenhuma emenda pública encontrada para este filtro.</div>';
+
+    // ---- Gráfico de execução financeira, um por emenda (destrói os antigos antes) ----
+    portalChartInstances.forEach(c => c.destroy());
+    portalChartInstances.clear();
+    if (window.Chart) {
+      lista.forEach(e => {
+        const ctx = document.getElementById(`portalChartEmenda-${e.id}`);
+        if (!ctx) return;
+        const chart = new Chart(ctx, {
+          type: 'bar',
+          data: {
+            labels: ['Previsto', 'Recebido', 'Empenhado', 'Pago'],
+            datasets: [{
+              data: [e.valorTotal || 0, r(e).totalReceita || 0, r(e).totalEmpenhado || 0, r(e).totalPago || 0],
+              backgroundColor: ['#93a8bc', '#14b8ee', '#b3790f', '#16875a'],
+              borderRadius: 5, maxBarThickness: 46
+            }]
+          },
+          options: {
+            indexAxis: 'y',
+            plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmtBRL(c.parsed.x) } } },
+            scales: { x: { ticks: { callback: (v) => fmtBRL(v) } } }
+          }
+        });
+        portalChartInstances.set(e.id, chart);
+      });
+    }
 
     document.querySelectorAll('[data-ver-exec]').forEach(btn => btn.addEventListener('click', async () => {
       const alvo = $('portalExec-' + btn.dataset.verExec);
