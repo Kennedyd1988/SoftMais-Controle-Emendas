@@ -161,10 +161,27 @@ Você encontra esse link clicando em **"Ver Portal Público ↗"** na barra
 lateral (abre em nova aba com a URL já pronta). Só aparecem lá as emendas
 marcadas com **"Publicar no Portal de Transparência"** no formulário de
 cadastro — isso é proposital: você decide o que fica público antes de
-publicar, em vez de tudo ir para o ar automaticamente. Quando marcada, o
-portal mostra também as despesas e receitas detalhadas (empenhado,
-liquidado, pago, credor, nota fiscal, contrato, licitação) e o atendimento
-de cada meta física.
+publicar, em vez de tudo ir para o ar automaticamente.
+
+O portal foi redesenhado pra ficar mais organizado e visual:
+- **Cartões de resumo** no topo (quantas emendas públicas, valor previsto,
+  recebido, empenhado, pago), já considerando os filtros aplicados
+- **Gráfico de barras** (Chart.js) comparando previsto × recebido ×
+  empenhado × pago do conjunto filtrado
+- **Barras de progresso** de execução física e financeira em cada cartão
+  de emenda — cor verde quando bate 100%, senão azul/amarelo
+- **Barras de progresso por meta física**, mostrando quanto já foi
+  entregue de cada meta
+- Detalhes (autor, partido, ato normativo, órgão executor, localidade,
+  beneficiário final, valores) organizados em grade, com botão pra abrir o
+  histórico completo de despesas e receitas (com documentos) só quando a
+  pessoa quiser ver
+
+⚠️ **Dados bancários nunca aparecem no Portal Público**, mesmo que a
+emenda esteja marcada como pública — isso foi proposital: divulgar
+agência/conta publicamente é um vetor comum de fraude (golpes se passando
+pelo fornecedor pra pedir troca de conta de pagamento). Os dados bancários
+ficam só dentro do app, visíveis apenas a quem tem login no ente.
 
 ⚠️ Importante sobre a regra pública do Firestore: qualquer um com o link
 consegue ler o **documento inteiro** da emenda marcada como pública (não dá
@@ -197,6 +214,14 @@ entregou de cada meta.
 **Receitas** — nova aba dentro de cada emenda, pra registrar quando o
 valor da emenda é efetivamente recebido (data, valor, conta bancária de
 recebimento, origem do recurso, documento comprobatório).
+
+**Editar despesas e receitas** — ambas agora têm botão **"Editar"** na
+listagem (junto do "Excluir"), abrindo o mesmo formulário já preenchido.
+Se você não escolher um novo arquivo ao editar, o comprovante anexado
+anteriormente é mantido; só é substituído se um arquivo novo for
+selecionado. A execução física/financeira da emenda é recalculada
+automaticamente depois de qualquer edição, do mesmo jeito que ao lançar ou
+excluir.
 
 **Importação de despesas por planilha** — dentro de cada emenda, no card
 "Despesas": botão **"⬇ Baixar modelo"** gera um Excel com a aba de

@@ -91,6 +91,8 @@ const state = {
   emendaEmEdicao: null,    // objeto de trabalho (inclui cronograma/instrumentos)
   despesasAtual: [],
   receitasAtual: [],
+  editandoDespesaId: null,
+  editandoReceitaId: null,
   usuarios: [],
   convites: [],
   telaAtual: 'painel',
@@ -745,11 +747,13 @@ function renderDespesas() {
       <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
         <span class="badge ${x.validadoPorControleInterno ? 'badge-green' : 'badge-amber'}">${x.validadoPorControleInterno ? 'Validado pelo Controle Interno' : 'Aguardando validação'}</span>
         ${papelAtual() === 'controleInterno' && !x.validadoPorControleInterno ? `<button class="btn btn-sm" data-validar-despesa="${x.id}">Validar</button>` : ''}
-        ${editavel ? `<button class="btn btn-sm btn-danger" data-rm-despesa="${x.id}" style="margin-left:auto;">Excluir</button>` : ''}
+        ${editavel ? `<button class="btn btn-sm" data-editar-despesa="${x.id}" style="margin-left:auto;">Editar</button>` : ''}
+        ${editavel ? `<button class="btn btn-sm btn-danger" data-rm-despesa="${x.id}">Excluir</button>` : ''}
       </div>
     </div>`;
   }).join('') : '<div class="empty-state">Nenhuma despesa lançada ainda.</div>';
   document.querySelectorAll('[data-validar-despesa]').forEach(b => b.addEventListener('click', () => validarDespesa(b.dataset.validarDespesa)));
+  document.querySelectorAll('[data-editar-despesa]').forEach(b => b.addEventListener('click', () => abrirDespesa(b.dataset.editarDespesa)));
   document.querySelectorAll('[data-rm-despesa]').forEach(b => b.addEventListener('click', () => excluirDespesa(b.dataset.rmDespesa)));
 }
 function renderReceitas() {
@@ -765,8 +769,9 @@ function renderReceitas() {
       ${x.documentoComprobatorioArquivo ? `<div class="screen-sub"><a href="${x.documentoComprobatorioArquivo}" download="${x.documentoComprobatorioNome || 'comprovante'}">📎 ${x.documentoComprobatorioNome || 'Ver comprovante'}</a></div>` : ''}
       ${x.documentoDriveLink ? `<div class="screen-sub"><a href="${x.documentoDriveLink}" target="_blank" rel="noopener">📎 ${x.documentoDriveNome || 'Ver no Google Drive'}</a></div>` : ''}
       ${x.observacoes ? `<div class="screen-sub">${x.observacoes}</div>` : ''}
-      ${editavel ? `<div style="margin-top:8px;"><button class="btn btn-sm btn-danger" data-rm-receita="${x.id}">Excluir</button></div>` : ''}
+      ${editavel ? `<div style="margin-top:8px; display:flex; gap:8px;"><button class="btn btn-sm" data-editar-receita="${x.id}">Editar</button><button class="btn btn-sm btn-danger" data-rm-receita="${x.id}">Excluir</button></div>` : ''}
     </div>`).join('') : '<div class="empty-state">Nenhuma receita lançada ainda.</div>';
+  document.querySelectorAll('[data-editar-receita]').forEach(b => b.addEventListener('click', () => abrirReceita(b.dataset.editarReceita)));
   document.querySelectorAll('[data-rm-receita]').forEach(b => b.addEventListener('click', () => excluirReceita(b.dataset.rmReceita)));
 }
 async function validarDespesa(id) {
@@ -794,29 +799,43 @@ function excluirReceita(id) {
 }
 
 // ---- modal Nova Despesa ----
-$('btnNovaDespesa').addEventListener('click', () => {
-  ['dpEmpenho', 'dpParcela', 'dpCredorNome', 'dpCredorCnpj', 'dpDotacao', 'dpElemento', 'dpUnidadeNome', 'dpUnidadeCodigo',
-    'dpContaBancaria', 'dpOrdemPagamento', 'dpValorEmpenho', 'dpValorPago', 'dpDataPagamento', 'dpHistorico',
-    'dpContrato', 'dpNotaFiscal', 'dpLicitacaoModalidade', 'dpProcessoLicitatorio', 'dpObs'].forEach(id => $(id).value = '');
-  $('dpArquivo').value = ''; $('dpArquivoAtual').textContent = '';
+function abrirDespesa(id) {
+  state.editandoDespesaId = id;
+  const emenda = state.emendas.find(e => e.id === state.editandoEmendaId) || {};
+  const metas = emenda.metas || [];
+  const d = id ? state.despesasAtual.find(x => x.id === id) : null;
+  $('modalDespesa').querySelector('.modal-title').textContent = id ? 'Editar despesa' : 'Nova despesa';
+  $('dpEmpenho').value = d?.numeroEmpenho || ''; $('dpParcela').value = d?.parcela || '';
+  $('dpCredorNome').value = d?.credorNome || ''; $('dpCredorCnpj').value = d?.credorCnpj || '';
+  $('dpDotacao').value = d?.dotacaoOrcamentaria || ''; $('dpElemento').value = d?.elementoDespesa || '';
+  $('dpUnidadeNome').value = d?.unidadeOrcamentariaNome || ''; $('dpUnidadeCodigo').value = d?.unidadeOrcamentariaCodigo || '';
+  $('dpContaBancaria').value = d?.contaBancaria || ''; $('dpOrdemPagamento').value = d?.ordemPagamento || '';
+  $('dpValorEmpenho').value = d?.valorEmpenho || ''; $('dpValorPago').value = d?.valorPago || '';
+  $('dpDataPagamento').value = d?.dataPagamento || ''; $('dpHistorico').value = d?.historico || '';
+  $('dpContrato').value = d?.contrato || ''; $('dpNotaFiscal').value = d?.notaFiscal || '';
+  $('dpLicitacaoModalidade').value = d?.licitacaoModalidade || ''; $('dpProcessoLicitatorio').value = d?.processoLicitatorio || '';
+  $('dpObs').value = d?.observacoes || '';
+  $('dpArquivo').value = '';
+  $('dpArquivoAtual').textContent = d?.documentoComprobatorioNome ? `Anexo atual: ${d.documentoComprobatorioNome} (escolha outro arquivo pra substituir)` :
+    (d?.documentoDriveNome ? `Anexo atual (Drive): ${d.documentoDriveNome} (escolha outro arquivo pra substituir)` : '');
   $('dpArquivoHint').textContent = (state.enteDados.googleDrive && state.enteDados.googleDrive.clientId)
     ? 'Este ente tem Google Drive configurado — o arquivo vai direto pra lá (sem limite de 600KB). Vai pedir login do Google na hora de salvar.'
     : 'Anexado direto no cadastro — limite de ~600KB por arquivo (configure o Google Drive em Dados do Ente pra anexar arquivos maiores).';
-  const emenda = state.emendas.find(e => e.id === state.editandoEmendaId) || {};
-  const metas = emenda.metas || [];
+  const metasVincExistentes = Object.fromEntries((d?.metasVinculadas || []).map(mv => [mv.metaId, mv.quantidade]));
   if (metas.length) {
     $('dpMetasWrap').style.display = '';
     $('dpMetasVinculacao').innerHTML = metas.map(m => `
       <div class="field" style="margin-bottom:8px;">
         <label style="font-weight:400;">${m.descricao || 'Meta'} (${m.unidade || ''})</label>
-        <input type="number" step="0.01" data-meta-vinc="${m.id}" placeholder="Quantidade entregue nesta despesa">
+        <input type="number" step="0.01" data-meta-vinc="${m.id}" value="${metasVincExistentes[m.id] || ''}" placeholder="Quantidade entregue nesta despesa">
       </div>`).join('');
   } else {
     $('dpMetasWrap').style.display = 'none';
     $('dpMetasVinculacao').innerHTML = '';
   }
   $('modalDespesa').classList.add('active');
-});
+}
+$('btnNovaDespesa').addEventListener('click', () => abrirDespesa(null));
 $('btnCancelarDespesa').addEventListener('click', () => $('modalDespesa').classList.remove('active'));
 $('btnSalvarDespesa').addEventListener('click', async () => {
   const numeroEmpenho = $('dpEmpenho').value.trim(), credorNome = $('dpCredorNome').value.trim();
@@ -824,7 +843,8 @@ $('btnSalvarDespesa').addEventListener('click', async () => {
   if (!numeroEmpenho || !credorNome || !valorEmpenho) { toast('Preencha nº do empenho, credor e valor do empenho.', true); return; }
   const btn = $('btnSalvarDespesa'); btn.disabled = true;
   try {
-    const anexo = await processarAnexo($('dpArquivo').files[0]);
+    const arquivo = $('dpArquivo').files[0];
+    const anexo = arquivo ? await processarAnexo(arquivo) : null; // null = manter anexo já existente (edição)
     const metasVinculadas = [];
     document.querySelectorAll('[data-meta-vinc]').forEach(el => {
       const q = Number(el.value) || 0;
@@ -832,23 +852,34 @@ $('btnSalvarDespesa').addEventListener('click', async () => {
     });
     const emenda = state.emendas.find(e => e.id === state.editandoEmendaId);
     const parcela = $('dpParcela').value.trim();
-    await addDoc(collection(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'despesas'), {
+    const notaFiscal = $('dpNotaFiscal').value.trim();
+    const payload = {
       numeroEmpenho, parcela, credorNome, credorCnpj: $('dpCredorCnpj').value.trim(),
       dotacaoOrcamentaria: $('dpDotacao').value.trim(), elementoDespesa: $('dpElemento').value.trim(),
       unidadeOrcamentariaNome: $('dpUnidadeNome').value.trim(), unidadeOrcamentariaCodigo: $('dpUnidadeCodigo').value.trim(),
       contaBancaria: $('dpContaBancaria').value.trim(), ordemPagamento: $('dpOrdemPagamento').value.trim(),
       valorEmpenho, valorPago: Number($('dpValorPago').value) || 0, dataPagamento: $('dpDataPagamento').value,
       historico: $('dpHistorico').value.trim(), contrato: $('dpContrato').value.trim(),
-      notaFiscal: $('dpNotaFiscal').value.trim(), licitacaoModalidade: $('dpLicitacaoModalidade').value.trim(),
+      notaFiscal, licitacaoModalidade: $('dpLicitacaoModalidade').value.trim(),
       processoLicitatorio: $('dpProcessoLicitatorio').value.trim(),
       ano: emenda?.exercicio || new Date().getFullYear(), metasVinculadas,
-      chaveImportacao: chaveDespesa({ numeroEmpenho, parcela, notaFiscal: $('dpNotaFiscal').value.trim() }),
-      ...anexo,
+      chaveImportacao: chaveDespesa({ numeroEmpenho, parcela, notaFiscal }),
       observacoes: $('dpObs').value.trim(),
-      validadoPorControleInterno: false, criadoEm: serverTimestamp(), criadoPor: state.user.uid
-    });
+    };
+    // Só mexe nos campos de anexo se um arquivo novo foi escolhido — assim,
+    // editar uma despesa sem trocar o arquivo mantém o anexo já salvo.
+    if (anexo) Object.assign(payload, anexo);
+    if (state.editandoDespesaId) {
+      await updateDoc(doc(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'despesas', state.editandoDespesaId), payload);
+      toast('Despesa atualizada!');
+    } else {
+      if (!anexo) Object.assign(payload, { documentoComprobatorioArquivo: null, documentoComprobatorioNome: null, documentoComprobatorioTipo: null, documentoDriveLink: null, documentoDriveNome: null });
+      await addDoc(collection(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'despesas'), {
+        ...payload, validadoPorControleInterno: false, criadoEm: serverTimestamp(), criadoPor: state.user.uid
+      });
+      toast('Despesa lançada!');
+    }
     $('modalDespesa').classList.remove('active');
-    toast('Despesa lançada!');
     await carregarDespesas(state.editandoEmendaId);
     await recomputeResumoFinanceiro(state.editandoEmendaId);
   } catch (err) {
@@ -872,30 +903,46 @@ function lerArquivoComoBase64(file) {
 }
 
 // ---- modal Nova Receita ----
-$('btnNovaReceita').addEventListener('click', () => {
-  $('rcData').value = ''; $('rcValor').value = ''; $('rcContaBancaria').value = '';
-  $('rcOrigem').value = ''; $('rcArquivo').value = ''; $('rcObs').value = '';
+function abrirReceita(id) {
+  state.editandoReceitaId = id;
+  const r = id ? state.receitasAtual.find(x => x.id === id) : null;
+  $('modalReceita').querySelector('.modal-title').textContent = id ? 'Editar receita' : 'Nova receita';
+  $('rcData').value = r?.data || ''; $('rcValor').value = r?.valor || '';
+  $('rcContaBancaria').value = r?.contaBancaria || ''; $('rcOrigem').value = r?.origem || '';
+  $('rcObs').value = r?.observacoes || ''; $('rcArquivo').value = '';
   $('rcArquivoHint').textContent = (state.enteDados.googleDrive && state.enteDados.googleDrive.clientId)
     ? 'Este ente tem Google Drive configurado — o arquivo vai direto pra lá (sem limite de 600KB).'
     : 'Anexado direto no cadastro — limite de ~600KB por arquivo.';
+  if (r?.documentoComprobatorioNome) $('rcArquivoHint').textContent += ` Anexo atual: ${r.documentoComprobatorioNome} (escolha outro pra substituir).`;
+  else if (r?.documentoDriveNome) $('rcArquivoHint').textContent += ` Anexo atual (Drive): ${r.documentoDriveNome} (escolha outro pra substituir).`;
   $('modalReceita').classList.add('active');
-});
+}
+$('btnNovaReceita').addEventListener('click', () => abrirReceita(null));
 $('btnCancelarReceita').addEventListener('click', () => $('modalReceita').classList.remove('active'));
 $('btnSalvarReceita').addEventListener('click', async () => {
   const data = $('rcData').value, valor = Number($('rcValor').value);
   if (!data || !valor) { toast('Preencha data e valor.', true); return; }
   const btn = $('btnSalvarReceita'); btn.disabled = true;
   try {
-    const anexo = await processarAnexo($('rcArquivo').files[0]);
+    const arquivo = $('rcArquivo').files[0];
+    const anexo = arquivo ? await processarAnexo(arquivo) : null;
     const emenda = state.emendas.find(e => e.id === state.editandoEmendaId);
-    await addDoc(collection(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'receitas'), {
+    const payload = {
       data, valor, contaBancaria: $('rcContaBancaria').value.trim(), origem: $('rcOrigem').value.trim(),
-      ano: emenda?.exercicio || new Date().getFullYear(),
-      ...anexo,
-      observacoes: $('rcObs').value.trim(), criadoEm: serverTimestamp(), criadoPor: state.user.uid
-    });
+      ano: emenda?.exercicio || new Date().getFullYear(), observacoes: $('rcObs').value.trim(),
+    };
+    if (anexo) Object.assign(payload, anexo);
+    if (state.editandoReceitaId) {
+      await updateDoc(doc(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'receitas', state.editandoReceitaId), payload);
+      toast('Receita atualizada!');
+    } else {
+      if (!anexo) Object.assign(payload, { documentoComprobatorioArquivo: null, documentoComprobatorioNome: null, documentoComprobatorioTipo: null, documentoDriveLink: null, documentoDriveNome: null });
+      await addDoc(collection(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'receitas'), {
+        ...payload, criadoEm: serverTimestamp(), criadoPor: state.user.uid
+      });
+      toast('Receita lançada!');
+    }
     $('modalReceita').classList.remove('active');
-    toast('Receita lançada!');
     await carregarReceitas(state.editandoEmendaId);
     await recomputeResumoFinanceiro(state.editandoEmendaId);
   } catch (err) {
@@ -1562,6 +1609,7 @@ $('btnConfirmarSim').addEventListener('click', async () => {
 // ============================================================
 // PORTAL DE TRANSPARÊNCIA (público, sem login)
 // ============================================================
+let portalChartInstance = null;
 async function initPortalPublico(enteId) {
   const enteSnap = await getDoc(doc(db, 'entes', enteId));
   if (!enteSnap.exists()) { $('portalEnteNome').textContent = 'Ente não encontrado.'; return; }
@@ -1576,6 +1624,8 @@ async function initPortalPublico(enteId) {
   const anos = [...new Set(emendas.map(e => e.exercicio).filter(Boolean))].sort((a, b) => b - a);
   $('portalFiltroExercicio').innerHTML = '<option value="">Todos os exercícios</option>' + anos.map(a => `<option value="${a}">${a}</option>`).join('');
 
+  const ESFERA_COR = { federal: 'badge-brand', estadual: 'badge-amber', municipal: 'badge-green' };
+
   function render() {
     const exercicio = $('portalFiltroExercicio').value, esfera = $('portalFiltroEsfera').value;
     const busca = $('portalBusca').value.trim().toLowerCase();
@@ -1586,35 +1636,93 @@ async function initPortalPublico(enteId) {
       return true;
     });
     const r = (e) => e.resumoExecucao || {};
+
+    // ---- KPIs consolidados ----
+    const totais = lista.reduce((acc, e) => {
+      acc.previsto += e.valorTotal || 0; acc.receita += r(e).totalReceita || 0;
+      acc.empenhado += r(e).totalEmpenhado || 0; acc.liquidado += r(e).totalLiquidado || 0; acc.pago += r(e).totalPago || 0;
+      return acc;
+    }, { previsto: 0, receita: 0, empenhado: 0, liquidado: 0, pago: 0 });
+    $('portalCards').innerHTML = `
+      <div class="card"><div class="kpi-label">Emendas públicas</div><div class="kpi-value">${lista.length}</div></div>
+      <div class="card"><div class="kpi-label">Valor previsto</div><div class="kpi-value" style="font-size:16px;">${fmtBRL(totais.previsto)}</div></div>
+      <div class="card"><div class="kpi-label">Recebido</div><div class="kpi-value" style="font-size:16px;">${fmtBRL(totais.receita)}</div></div>
+      <div class="card"><div class="kpi-label">Empenhado</div><div class="kpi-value" style="font-size:16px;">${fmtBRL(totais.empenhado)}</div></div>
+      <div class="card"><div class="kpi-label">Pago</div><div class="kpi-value" style="font-size:16px;">${fmtBRL(totais.pago)}</div><div class="kpi-sub">${totais.previsto > 0 ? Math.round(totais.pago / totais.previsto * 1000) / 10 : 0}% do previsto</div></div>`;
+
+    // ---- Gráfico consolidado (previsto x recebido x empenhado x pago) ----
+    if (portalChartInstance) portalChartInstance.destroy();
+    const ctx = document.getElementById('portalChart');
+    if (ctx && window.Chart) {
+      portalChartInstance = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Previsto', 'Recebido', 'Empenhado', 'Pago'],
+          datasets: [{
+            data: [totais.previsto, totais.receita, totais.empenhado, totais.pago],
+            backgroundColor: ['#93a8bc', '#14b8ee', '#b3790f', '#16875a'],
+            borderRadius: 6, maxBarThickness: 70
+          }]
+        },
+        options: {
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: (c) => fmtBRL(c.parsed.y) } } },
+          scales: { y: { ticks: { callback: (v) => fmtBRL(v) } } }
+        }
+      });
+    }
+
+    // ---- Lista de emendas ----
     const metasHtml = (e) => {
       const resumoMetas = (r(e).metas && r(e).metas.length) ? r(e).metas : (e.metas || []).map(m => ({ ...m, quantidadeRealizada: 0, percentual: 0 }));
-      if (!resumoMetas.length) return '—';
-      return resumoMetas.map(m => `${m.descricao}: ${m.quantidadeRealizada || 0} de ${m.quantidadePrevista} ${m.unidade || ''} (${m.percentual || 0}%)`).join('<br>');
+      if (!resumoMetas.length) return '';
+      return `<div class="publico-metas"><div class="publico-bar-label"><strong>Metas físicas</strong></div>` +
+        resumoMetas.map(m => `
+          <div style="margin-bottom:8px;">
+            <div class="publico-bar-label"><span>${m.descricao || 'Meta'}</span><span>${m.quantidadeRealizada || 0} de ${m.quantidadePrevista} ${m.unidade || ''} — ${m.percentual || 0}%</span></div>
+            <div class="conf-bar-track"><div class="conf-bar-fill" style="width:${Math.min(100, m.percentual || 0)}%; background:var(--cyan);"></div></div>
+          </div>`).join('') + `</div>`;
     };
-    $('portalLista').innerHTML = lista.length ? lista.map(e => `
+    $('portalLista').innerHTML = lista.length ? lista.map(e => {
+      const pFisico = Math.min(100, r(e).percFisicoAtual || 0), pFinanceiro = Math.min(100, r(e).percFinanceiroAtual || 0);
+      return `
       <div class="publico-emenda">
-        <h3>${e.numeroEmenda || '—'} — ${e.objeto || 'Sem objeto informado'}</h3>
+        <div class="publico-emenda-head">
+          <div>
+            <span class="badge ${ESFERA_COR[e.esfera] || 'badge-brand'}">${ESFERA_LABEL[e.esfera] || e.esfera}</span>
+            <span class="screen-sub" style="margin-left:6px;">Nº ${e.numeroEmenda || '—'} · ${e.exercicio || '—'}</span>
+            <h3 style="margin-top:6px;">${e.objeto || 'Sem objeto informado'}</h3>
+          </div>
+          <div class="publico-valor">${fmtBRL(e.valorTotal)}</div>
+        </div>
+
+        <div class="publico-bars">
+          <div>
+            <div class="publico-bar-label"><span>Execução física</span><span>${pFisico}%</span></div>
+            <div class="conf-bar-track"><div class="conf-bar-fill" style="width:${pFisico}%; background:${pFisico === 100 ? 'var(--green)' : 'var(--cyan)'};"></div></div>
+          </div>
+          <div>
+            <div class="publico-bar-label"><span>Execução financeira</span><span>${pFinanceiro}%</span></div>
+            <div class="conf-bar-track"><div class="conf-bar-fill" style="width:${pFinanceiro}%; background:${pFinanceiro === 100 ? 'var(--green)' : 'var(--amber)'};"></div></div>
+          </div>
+        </div>
+
         <dl class="publico-grid">
-          <div><dt>Esfera</dt><dd>${ESFERA_LABEL[e.esfera] || e.esfera}</dd></div>
-          <div><dt>Exercício</dt><dd>${e.exercicio || '—'}</dd></div>
           <div><dt>Autor / Parlamentar</dt><dd>${e.autorEmenda || '—'}</dd></div>
           <div><dt>Partido/Unidade</dt><dd>${e.partidoUnidade || '—'}</dd></div>
-          <div><dt>Valor</dt><dd>${fmtBRL(e.valorTotal)}</dd></div>
           <div><dt>Ato normativo</dt><dd>${e.atoNormativoOrcamentario || '—'}</dd></div>
           <div><dt>Órgão executor</dt><dd>${e.orgaoEntidadeExecutora || '—'}</dd></div>
           <div><dt>Localidade beneficiada</dt><dd>${e.localidadeBeneficiada || '—'}</dd></div>
           <div><dt>Beneficiário final</dt><dd>${e.beneficiarioFinal || '—'}</dd></div>
-          <div><dt>Recebido (receita)</dt><dd>${fmtBRL(r(e).totalReceita)}</dd></div>
+          <div><dt>Recebido</dt><dd>${fmtBRL(r(e).totalReceita)}</dd></div>
           <div><dt>Empenhado</dt><dd>${fmtBRL(r(e).totalEmpenhado)}</dd></div>
           <div><dt>Liquidado</dt><dd>${fmtBRL(r(e).totalLiquidado)}</dd></div>
           <div><dt>Pago</dt><dd>${fmtBRL(r(e).totalPago)}</dd></div>
-          <div><dt>Execução física</dt><dd>${r(e).percFisicoAtual || 0}%</dd></div>
-          <div><dt>Execução financeira</dt><dd>${r(e).percFinanceiroAtual || 0}%</dd></div>
-          <div><dt>Metas físicas</dt><dd>${metasHtml(e)}</dd></div>
         </dl>
-        <button class="btn btn-sm" style="margin-top:12px;" data-ver-exec="${e.id}">Ver despesas, receitas e documentos</button>
+        ${metasHtml(e)}
+        <button class="btn btn-sm" style="margin-top:14px;" data-ver-exec="${e.id}">Ver despesas, receitas e documentos</button>
         <div id="portalExec-${e.id}" style="margin-top:10px;"></div>
-      </div>`).join('') : '<div class="empty-state">Nenhuma emenda pública encontrada para este filtro.</div>';
+      </div>`;
+    }).join('') : '<div class="empty-state">Nenhuma emenda pública encontrada para este filtro.</div>';
 
     document.querySelectorAll('[data-ver-exec]').forEach(btn => btn.addEventListener('click', async () => {
       const alvo = $('portalExec-' + btn.dataset.verExec);
