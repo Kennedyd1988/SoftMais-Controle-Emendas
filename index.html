@@ -308,8 +308,14 @@
           <div class="screen-title">Emendas Parlamentares</div>
           <div class="screen-sub">Cadastro, esfera, autoria e objeto</div>
         </div>
-        <button class="btn btn-primary" id="btnNovaEmenda">+ Nova Emenda</button>
+        <div style="display:flex; gap:8px;">
+          <input type="file" id="emImportarArquivo" accept=".xlsx,.csv" style="display:none;">
+          <button class="btn" id="btnModeloEmendas">⬇ Baixar modelo</button>
+          <button class="btn" id="btnImportarEmendas">⬆ Importar emendas</button>
+          <button class="btn btn-primary" id="btnNovaEmenda">+ Nova Emenda</button>
+        </div>
       </div>
+      <div id="importEmendasLog" style="display:none; background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; max-height:180px; overflow-y:auto; white-space:pre-wrap; font-family:'IBM Plex Mono',monospace; margin-bottom:14px;"></div>
       <div class="toolbar">
         <input type="text" class="grow" id="emendasBusca" placeholder="Buscar por autor, objeto ou nº...">
         <select id="emendasFiltroEsfera">
@@ -369,12 +375,27 @@
         <div class="field-hint" style="margin:-8px 0 14px;">O beneficiário final é quem recebe o recurso de fato — diferente da localidade (onde) e do órgão executor (quem executa).</div>
 
         <div class="field">
-          <label>Meta física prevista</label>
+          <label>Dados bancários (conta de recebimento/execução da emenda)</label>
           <div class="field-row">
-            <div class="field"><input type="text" id="fMetaDescricao" placeholder="Descrição da meta (ex: rede de água, famílias atendidas)"></div>
-            <div class="field" style="max-width:140px;"><input type="number" step="0.01" id="fMetaQuantidade" placeholder="Quantidade"></div>
-            <div class="field" style="max-width:120px;"><input type="text" id="fMetaUnidade" placeholder="Unidade (m, un...)"></div>
+            <div class="field"><input type="text" id="fBancoNome" placeholder="Banco (ex: Banco do Brasil)"></div>
+            <div class="field" style="max-width:110px;"><input type="text" id="fBancoAgencia" placeholder="Agência"></div>
+            <div class="field" style="max-width:150px;"><input type="text" id="fBancoConta" placeholder="Conta"></div>
+            <div class="field" style="max-width:150px;">
+              <select id="fBancoTipoConta">
+                <option value="">Tipo de conta</option>
+                <option value="corrente">Corrente</option>
+                <option value="poupanca">Poupança</option>
+                <option value="especifica">Conta específica/vinculada</option>
+              </select>
+            </div>
           </div>
+        </div>
+
+        <div class="field">
+          <label>Metas físicas previstas</label>
+          <div id="metasLista"></div>
+          <button class="btn btn-sm" id="btnAddMeta" type="button">+ Adicionar meta</button>
+          <div class="field-hint">A execução física da emenda passa a ser calculada automaticamente pelo atendimento dessas metas (lançado na tela de Execução).</div>
         </div>
 
         <div class="field">
@@ -412,18 +433,32 @@
         <h3 style="font-size:14px;">Rastreabilidade (itens adicionais além dos 16 quesitos técnicos)</h3>
         <div class="screen-sub" style="margin-top:2px;">Beneficiário final, metas, execução física/financeira e documentação — apontados no Acórdão, ainda fora do escopo técnico do levantamento original.</div>
         <div class="checklist" id="checklistRastreabilidade"></div>
-        <div style="margin-top:14px;">
-          <div class="screen-sub" id="metaResumoTexto">Sem meta física cadastrada.</div>
-          <div class="conf-bar-track"><div class="conf-bar-fill" id="metaBarFill" style="width:0%; background:var(--cyan);"></div></div>
-        </div>
+        <div id="metasResumoLista" style="margin-top:14px;"></div>
       </div>
 
-      <div class="card" id="cardExecucao" style="display:none;">
+      <div class="card" id="cardDespesas" style="display:none; margin-bottom:18px;">
         <div class="screen-head" style="margin-bottom:10px;">
-          <h3 style="font-size:14px;">Execução físico-financeira</h3>
-          <button class="btn btn-sm btn-primary" id="btnNovaExecucao">+ Lançar etapa</button>
+          <div>
+            <h3 style="font-size:14px;">Despesas (empenho, liquidação e pagamento)</h3>
+            <div class="field-hint">Um único registro por despesa — a execução física é calculada pela soma das quantidades vinculadas às metas.</div>
+          </div>
+          <div style="display:flex; gap:8px;">
+            <input type="file" id="dpImportarArquivo" accept=".xlsx,.csv" style="display:none;">
+            <button class="btn btn-sm" id="btnImportarDespesas">⬆ Importar planilha</button>
+            <button class="btn btn-sm" id="btnModeloDespesas">⬇ Baixar modelo</button>
+            <button class="btn btn-sm btn-primary" id="btnNovaDespesa">+ Nova despesa</button>
+          </div>
         </div>
-        <div id="execucoesLista"></div>
+        <div id="importDespesasLog" style="display:none; background:var(--surface-2); border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; max-height:180px; overflow-y:auto; white-space:pre-wrap; font-family:'IBM Plex Mono',monospace; margin-bottom:12px;"></div>
+        <div id="despesasLista"></div>
+      </div>
+
+      <div class="card" id="cardReceitas" style="display:none;">
+        <div class="screen-head" style="margin-bottom:10px;">
+          <h3 style="font-size:14px;">Receitas (recebimento do valor da emenda)</h3>
+          <button class="btn btn-sm btn-primary" id="btnNovaReceita">+ Nova receita</button>
+        </div>
+        <div id="receitasLista"></div>
       </div>
     </div>
 
@@ -564,6 +599,14 @@
         </div>
         <button class="btn btn-primary" id="btnSalvarDadosEnte">Salvar</button>
       </div>
+
+      <div class="card" style="margin-top:16px;">
+        <h3 style="font-size:14px;">Anexos no Google Drive (opcional)</h3>
+        <div class="field-hint" style="margin-bottom:12px;">Configure isto se quiser anexar documentos maiores que 600KB nas despesas/receitas — eles vão para o Google Drive da conta que autorizar, em vez de ficarem salvos no banco de dados. Sem essa configuração, os anexos continuam funcionando normalmente (só com o limite de 600KB).</div>
+        <div class="field"><label>Client ID OAuth do Google Cloud</label><input type="text" id="deDriveClientId" placeholder="algo.apps.googleusercontent.com"></div>
+        <div class="field"><label>ID da pasta no Google Drive</label><input type="text" id="deDriveFolderId" placeholder="Encontrado na URL da pasta no Drive"></div>
+        <button class="btn" id="btnSalvarDrive">Salvar configuração do Drive</button>
+      </div>
     </div>
 
   </div>
@@ -631,30 +674,80 @@
   </div>
 </div>
 
-<div class="modal-overlay" id="modalExecucao">
-  <div class="modal">
-    <div class="modal-title">Lançar etapa de execução</div>
-    <div class="field"><label>Etapa<span class="req">*</span></label>
-      <select id="exEtapa"><option value="empenho">Empenho</option><option value="liquidacao">Liquidação</option><option value="pagamento">Pagamento</option></select>
+<div class="modal-overlay" id="modalDespesa">
+  <div class="modal modal-wide">
+    <div class="modal-title">Nova despesa</div>
+    <div class="modal-sub">Empenho, liquidação e pagamento num registro só.</div>
+    <div class="field-row">
+      <div class="field"><label>Nº do empenho<span class="req">*</span></label><input type="text" id="dpEmpenho"></div>
+      <div class="field"><label>Parcela</label><input type="text" id="dpParcela" placeholder="Ex: 427001-1"></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>Data<span class="req">*</span></label><input type="date" id="exData"></div>
-      <div class="field"><label>Valor (R$)<span class="req">*</span></label><input type="number" step="0.01" id="exValor"></div>
+      <div class="field"><label>Credor/Fornecedor<span class="req">*</span></label><input type="text" id="dpCredorNome"></div>
+      <div class="field"><label>CNPJ do credor</label><input type="text" id="dpCredorCnpj"></div>
     </div>
     <div class="field-row">
-      <div class="field"><label>% físico acumulado</label><input type="number" step="0.1" id="exPercFisico"></div>
-      <div class="field"><label>% financeiro acumulado</label><input type="number" step="0.1" id="exPercFinanceiro"></div>
+      <div class="field"><label>Dotação orçamentária</label><input type="text" id="dpDotacao" placeholder="99.999.9999.9999.9999"></div>
+      <div class="field"><label>Elemento de despesa</label><input type="text" id="dpElemento" placeholder="9.9.99.99.99"></div>
     </div>
-    <div class="field"><label>Quantidade realizada acumulada (meta física)</label><input type="number" step="0.01" id="exQtdRealizada" placeholder="Na mesma unidade da meta física da emenda"></div>
+    <div class="field-row">
+      <div class="field"><label>Unidade orçamentária</label><input type="text" id="dpUnidadeNome"></div>
+      <div class="field"><label>Código da unidade</label><input type="text" id="dpUnidadeCodigo"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Conta bancária</label><input type="text" id="dpContaBancaria"></div>
+      <div class="field"><label>Ordem de pagamento</label><input type="text" id="dpOrdemPagamento"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Valor do empenho (R$)<span class="req">*</span></label><input type="number" step="0.01" id="dpValorEmpenho"></div>
+      <div class="field"><label>Valor liquidado/pago (R$)</label><input type="number" step="0.01" id="dpValorPago"></div>
+    </div>
+    <div class="field"><label>Data do pagamento</label><input type="date" id="dpDataPagamento"></div>
+    <div class="field"><label>Histórico / objeto da despesa</label><textarea id="dpHistorico"></textarea></div>
+    <div class="field-row">
+      <div class="field"><label>Contrato vinculado</label><input type="text" id="dpContrato"></div>
+      <div class="field"><label>Nota fiscal</label><input type="text" id="dpNotaFiscal"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Modalidade de licitação</label><input type="text" id="dpLicitacaoModalidade"></div>
+      <div class="field"><label>Processo licitatório</label><input type="text" id="dpProcessoLicitatorio"></div>
+    </div>
+    <div class="field" id="dpMetasWrap" style="display:none;">
+      <label>Quantidade entregue de cada meta física nesta despesa</label>
+      <div id="dpMetasVinculacao"></div>
+      <div class="field-hint">A execução física da emenda soma as quantidades de todas as despesas vinculadas a cada meta.</div>
+    </div>
     <div class="field"><label>Documento comprobatório</label>
-      <input type="file" id="exArquivo" accept="image/*,application/pdf">
-      <div class="field-hint">Anexado direto no cadastro (sem custo de armazenamento externo) — limite de ~600KB por arquivo.</div>
-      <div id="exArquivoAtual" class="field-hint"></div>
+      <input type="file" id="dpArquivo" accept="image/*,application/pdf">
+      <div class="field-hint" id="dpArquivoHint">Anexado direto no cadastro — limite de ~600KB por arquivo (ou envie para o Google Drive do ente, se configurado em Dados do Ente).</div>
+      <div id="dpArquivoAtual" class="field-hint"></div>
     </div>
-    <div class="field"><label>Observações</label><textarea id="exObs"></textarea></div>
+    <div class="field"><label>Observações</label><textarea id="dpObs"></textarea></div>
     <div class="modal-actions">
-      <button class="btn" id="btnCancelarExecucao">Cancelar</button>
-      <button class="btn btn-primary" id="btnSalvarExecucao">Salvar etapa</button>
+      <button class="btn" id="btnCancelarDespesa">Cancelar</button>
+      <button class="btn btn-primary" id="btnSalvarDespesa">Salvar despesa</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalReceita">
+  <div class="modal">
+    <div class="modal-title">Nova receita</div>
+    <div class="modal-sub">Registro do recebimento do valor da emenda.</div>
+    <div class="field-row">
+      <div class="field"><label>Data<span class="req">*</span></label><input type="date" id="rcData"></div>
+      <div class="field"><label>Valor (R$)<span class="req">*</span></label><input type="number" step="0.01" id="rcValor"></div>
+    </div>
+    <div class="field"><label>Conta bancária de recebimento</label><input type="text" id="rcContaBancaria"></div>
+    <div class="field"><label>Origem do recurso</label><input type="text" id="rcOrigem" placeholder="Ex: Governo Federal, Governo Estadual"></div>
+    <div class="field"><label>Documento comprobatório</label>
+      <input type="file" id="rcArquivo" accept="image/*,application/pdf">
+      <div class="field-hint" id="rcArquivoHint">Anexado direto no cadastro — limite de ~600KB por arquivo.</div>
+    </div>
+    <div class="field"><label>Observações</label><textarea id="rcObs"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn" id="btnCancelarReceita">Cancelar</button>
+      <button class="btn btn-primary" id="btnSalvarReceita">Salvar receita</button>
     </div>
   </div>
 </div>

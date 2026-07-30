@@ -113,26 +113,45 @@ etapas subsequentes" — item 3), mas o Acórdão determina adequação a eles
 também:
 - **Identificação do beneficiário final** — campo próprio na emenda,
   separado da localidade (onde) e do órgão executor (quem executa)
-- **Metas previstas quantificadas** — descrição + quantidade + unidade
-- **% de atingimento da meta** — calculado a partir da quantidade
-  realizada acumulada, lançada em cada etapa de execução
-- **Execução física e financeira atualizada** — consolidada
-  automaticamente a partir das etapas lançadas (empenho/liquidação/
-  pagamento) em cada emenda, sem precisar digitar de novo
+- **Metas físicas previstas (quantas quiser por emenda)** — cada uma com
+  descrição, quantidade e unidade. Uma emenda pode ter várias metas
+  (ex: "500m de rede de água" + "200 famílias atendidas")
+- **Execução física = atendimento médio das metas** — na tela de Execução,
+  cada etapa lançada pede a quantidade acumulada realizada de *cada* meta
+  cadastrada. O app calcula sozinho o % físico da emenda como a média do
+  % de atingimento de cada meta — não é mais um número digitado à mão.
+  Se a emenda não tiver nenhuma meta cadastrada, o app volta ao
+  comportamento antigo (% físico digitado manualmente por etapa)
+- **Execução financeira atualizada** — consolidada automaticamente a
+  partir das etapas lançadas (empenho/liquidação/pagamento) em cada
+  emenda, sem precisar digitar de novo
 - **Documentação comprobatória vinculada** — agora é upload de verdade
   (base64 direto no Firestore, sem custo de Storage — limite de ~600KB por
   arquivo), não só um texto de referência
+
+⚠️ **Nota de migração**: emendas cadastradas antes desta versão usavam um
+campo de meta única (`metaFisica`). Esse campo antigo continua salvo no
+banco, mas o app agora lê e mostra apenas o novo campo `metas` (lista). Se
+você já tinha cadastrado uma meta em alguma emenda, precisa recadastrá-la
+na tela de edição da emenda, no bloco "Metas físicas previstas".
+
+⚠️ **Outra nota de migração**: se você já tinha lançado alguma "etapa de
+execução" (empenho/liquidação/pagamento separados) antes desta versão,
+esses registros ficaram salvos na subcoleção antiga `execucoes` e **não
+aparecem mais no app** — a tela agora lê da nova subcoleção `despesas`
+(registro único por despesa). Não são muitos dados normalmente (é recente),
+mas relance essas despesas na tela nova, se for o caso.
 
 Quando os 11 quesitos técnicos de uma emenda batem 100%, o botão **"Emitir
 Certidão de Regularidade"** libera um PDF simples com os dados da emenda.
 
 ## 8. Acompanhamento Consolidado
 Tela nova (aba própria, configurável por usuário) que soma, por exercício,
-o valor previsto, empenhado, liquidado e pago de todas as emendas do ente
-num só lugar — sem precisar abrir emenda por emenda. Os totais vêm de um
-campo `resumoExecucao` que é recalculado automaticamente sempre que uma
-etapa de execução é lançada, editada ou excluída (evita ter que reler todas
-as subcoleções de execução toda vez que a tela abre).
+o valor previsto, recebido (receita), empenhado e pago de todas as emendas
+do ente num só lugar — sem precisar abrir emenda por emenda. Os totais vêm
+de um campo `resumoExecucao` que é recalculado automaticamente sempre que
+uma despesa ou receita é lançada, editada ou excluída (evita ter que reler
+todas as subcoleções de cada emenda toda vez que a tela abre).
 
 ## 9. Portal de Transparência (público, sem login)
 Cada ente tem uma URL pública própria:
@@ -142,7 +161,10 @@ Você encontra esse link clicando em **"Ver Portal Público ↗"** na barra
 lateral (abre em nova aba com a URL já pronta). Só aparecem lá as emendas
 marcadas com **"Publicar no Portal de Transparência"** no formulário de
 cadastro — isso é proposital: você decide o que fica público antes de
-publicar, em vez de tudo ir para o ar automaticamente.
+publicar, em vez de tudo ir para o ar automaticamente. Quando marcada, o
+portal mostra também as despesas e receitas detalhadas (empenhado,
+liquidado, pago, credor, nota fiscal, contrato, licitação) e o atendimento
+de cada meta física.
 
 ⚠️ Importante sobre a regra pública do Firestore: qualquer um com o link
 consegue ler o **documento inteiro** da emenda marcada como pública (não dá
@@ -151,25 +173,108 @@ informação sensível/interna nos campos da emenda — se precisar de anotaçõ
 internas, crie um campo separado e não o inclua na tela pública nem marque
 a emenda como pública até remover essa informação.
 
+## 10. Despesas, Receitas, Dados Bancários e Importação de Planilhas
+
+**Dados bancários** — cada emenda tem um bloco de banco/agência/conta/tipo
+de conta, referente à conta usada para receber e executar o recurso.
+
+**Despesas** — substituíram a antiga "Execução" por etapas separadas.
+Agora **cada despesa é um único registro** cobrindo empenho + liquidação +
+pagamento juntos, com todos os campos de rastreabilidade: número do
+empenho, credor, CNPJ, dotação orçamentária, elemento de despesa, unidade
+orçamentária, conta bancária, valores (empenhado e liquidado/pago), ordem
+de pagamento, data, histórico, contrato, nota fiscal, modalidade e processo
+de licitação. Cada despesa pode ser vinculada a quantas metas físicas a
+emenda tiver, informando a quantidade que aquela despesa específica
+entregou de cada meta.
+
+- **Execução física** = soma das quantidades entregues (em todas as
+  despesas) para cada meta, dividida pela quantidade prevista — não é mais
+  digitada à mão.
+- **Execução financeira** = valor pago dividido pelo valor total da
+  emenda — também automática.
+
+**Receitas** — nova aba dentro de cada emenda, pra registrar quando o
+valor da emenda é efetivamente recebido (data, valor, conta bancária de
+recebimento, origem do recurso, documento comprobatório).
+
+**Importação de despesas por planilha** — dentro de cada emenda, no card
+"Despesas": botão **"⬇ Baixar modelo"** gera um Excel com a aba de
+instruções e as colunas exatas usadas pelos sistemas contábeis municipais
+(EMPENHO, NOME, CFPRO, CATEC, UNIDADENOME, UNIDADE, CONTAC, VAPAG, ORDPG,
+DTLAN, HISTORICO, CONTRATO, LICMOD, PROCLIC, NOTAFISCAL, VALOREMPENHO,
+CNPJFORNECEDOR, PARCELA). O botão **"⬆ Importar planilha"** aceita esse
+mesmo formato em `.xlsx` ou `.csv` (separado por `;`, igual ao exportado
+pelo sistema de contabilidade). **Duplicados são bloqueados
+automaticamente** — a chave usada é `número do empenho + parcela + nota
+fiscal`; uma linha que já foi importada antes é pulada e contabilizada no
+resumo da importação, não é lançada de novo. As metas físicas não vêm da
+planilha (o formato de origem não tem essa informação) — vincule
+manualmente em cada despesa depois, se precisar que a execução física
+considere aquele lançamento.
+
+**Importação/exportação de emendas** — na tela de listagem de Emendas,
+botão **"⬇ Baixar modelo"** gera um Excel próprio (esfera, exercício,
+número, autor, partido, objeto, valor, ato normativo, órgão executor,
+localidade, beneficiário final, dados bancários) com aba de instruções e
+linha de exemplo. O botão **"⬆ Importar emendas"** lê esse modelo
+preenchido e cadastra em lote — também bloqueia duplicados (mesma
+combinação de número + exercício não é importada duas vezes). A exportação
+de emendas já cadastradas continua disponível em **Relatórios → Exportar
+XLSX**.
+
+## 11. Anexos no Google Drive (opcional)
+Por padrão, os comprovantes de despesas/receitas são salvos como base64
+direto no Firestore, com limite de ~600KB por arquivo (ver seção de
+limitações). Se isso for pouco, cada ente pode configurar upload direto
+para uma pasta do Google Drive — sem precisar de servidor próprio, o
+upload acontece direto do navegador pra API do Google.
+
+**Como configurar (uma vez por ente):**
+1. Acesse **console.cloud.google.com** → crie um projeto nesse ou use um já existente
+2. **APIs e serviços → Biblioteca** → busque e ative **"Google Drive API"**
+3. **APIs e serviços → Tela de permissão OAuth** → configure como "Externo",
+   preencha os campos obrigatórios (nome do app, e-mail) e publique
+4. **APIs e serviços → Credenciais → Criar credenciais → ID do cliente OAuth**
+   → tipo "Aplicativo da Web" → em "Origens JavaScript autorizadas",
+   adicione `https://seu-usuario.github.io` (sem barra no final)
+5. Copie o **Client ID** gerado (termina em `.apps.googleusercontent.com`)
+6. No Google Drive, crie (ou escolha) uma pasta para os anexos e copie o
+   ID dela a partir da URL (a parte depois de `/folders/`)
+7. No app: **Dados do Ente → Anexos no Google Drive** → cole o Client ID e
+   o ID da pasta → **Salvar configuração do Drive**
+
+A partir daí, sempre que alguém for anexar um documento numa despesa ou
+receita, o navegador vai pedir login e permissão do Google na hora (usa o
+escopo `drive.file`, que só dá acesso aos arquivos que o próprio app cria
+— nunca ao Drive inteiro da pessoa). O link do arquivo fica salvo no
+lançamento e aparece também no Portal Público, se a emenda for pública.
+
+⚠️ Isso é opcional — sem configurar nada, os anexos continuam funcionando
+normalmente (só com o limite de 600KB por arquivo).
+
 ## Limitações desta primeira versão (dá pra evoluir depois)
-- **Upload de comprovantes tem teto de ~600KB por arquivo** — é base64
-  guardado direto no documento da execução (sem Storage pago), e o
-  Firestore tem limite de 1MB por documento inteiro. Para PDFs grandes ou
-  fotos em alta resolução, seria necessário migrar pra Firebase Storage
-  (plano pago) — sinalizando aqui como já avisado no início do projeto
+- **Upload de comprovantes sem Google Drive configurado tem teto de
+  ~600KB por arquivo** — é base64 guardado direto no documento (sem
+  Storage pago), e o Firestore tem limite de 1MB por documento inteiro.
+  Configure o Google Drive (seção 11) se precisar de arquivos maiores
 - Sem paginação nas listas — funciona bem até algumas centenas de emendas
   por ente; se crescer muito, dá pra portar a mesma técnica de paginação
   que o app da igreja usa em Fiéis/Lançamentos
-- Sem assistente de importação de planilha antiga (dá pra adicionar depois,
-  no mesmo padrão do importador do app da igreja)
 - O checklist de conformidade de nível ENTE (os 5 primeiros quesitos, ver
   seção 7) é uma adaptação simplificada do questionário original — revisar
   com a equipe técnica do TCE-RN se precisar de fidelidade maior a como
   eles auditam hoje
-- O "% de atingimento de metas" assume que a meta é um número único por
-  emenda (ex: "500 metros de rede"), não metas por marco do cronograma —
-  se uma emenda tiver metas diferentes em cada etapa, seria preciso separar
-  o campo de meta por marco em vez de um valor só por emenda
+- A importação de despesas não traz vínculo com metas físicas (o formato
+  de planilha de origem não tem essa informação) — precisa vincular
+  manualmente depois de importar, em cada despesa que afete uma meta
+- A importação de emendas e despesas roda linha por linha (não em lote de
+  verdade no Firestore) — funciona bem para dezenas/poucas centenas de
+  linhas por vez; para volumes muito grandes pode demorar alguns minutos
+- O Google Drive usa autorização OAuth por sessão — cada pessoa que for
+  anexar um arquivo precisa autorizar com a própria conta Google na hora
+  (não há uma "conta única" compartilhada automaticamente); o token dura
+  a sessão do navegador
 - A recuperação de senha na tela de login ainda não tem um botão próprio
   ("esqueci minha senha") para quem já está logado tentando entrar — hoje
   isso só existe dentro de "Editar usuário" (um admin envia o e-mail de

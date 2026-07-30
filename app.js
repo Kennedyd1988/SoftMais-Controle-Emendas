@@ -64,8 +64,8 @@ function quesitosRastreabilidade(e) {
   const r = e.resumoExecucao || {};
   return [
     { id: 'beneficiario_final', label: 'Identificação do beneficiário final', ok: !!(e.beneficiarioFinal && e.beneficiarioFinal.trim()) },
-    { id: 'metas_previstas', label: 'Metas previstas (quantificadas)', ok: !!(e.metaFisica && e.metaFisica.descricao && e.metaFisica.quantidadePrevista > 0) },
-    { id: 'execucao_fisica', label: 'Execução física registrada', ok: (r.qtdEtapas || 0) > 0 && (r.percFisicoAtual || 0) > 0 },
+    { id: 'metas_previstas', label: 'Metas previstas (quantificadas)', ok: !!(e.metas && e.metas.length > 0 && e.metas.every(m => m.descricao && m.quantidadePrevista > 0)) },
+    { id: 'execucao_fisica', label: 'Execução física registrada', ok: (r.qtdDespesas || 0) > 0 && (r.percFisicoAtual || 0) > 0 },
     { id: 'execucao_financeira', label: 'Execução financeira atualizada', ok: (r.totalPago || 0) > 0 || (r.totalLiquidado || 0) > 0 || (r.totalEmpenhado || 0) > 0 },
     { id: 'documentacao_comprobatoria', label: 'Documentação comprobatória anexada', ok: (r.qtdComDocumento || 0) > 0 },
   ];
@@ -89,7 +89,8 @@ const state = {
   exercicioSelecionadoConformidade: '',
   editandoEmendaId: null,
   emendaEmEdicao: null,    // objeto de trabalho (inclui cronograma/instrumentos)
-  execucoesAtual: [],
+  despesasAtual: [],
+  receitasAtual: [],
   usuarios: [],
   convites: [],
   telaAtual: 'painel',
@@ -430,14 +431,92 @@ $('emendasFiltroEsfera')?.addEventListener('change', renderEmendasLista);
 $('emendasFiltroExercicio')?.addEventListener('change', renderEmendasLista);
 $('btnNovaEmenda').addEventListener('click', () => abrirEmenda(null));
 
+// ---- Importação/exportação em lote de emendas ----
+const COLUNAS_IMPORT_EMENDA = ['ESFERA', 'EXERCICIO', 'NUMERO_EMENDA', 'AUTOR', 'PARTIDO_UNIDADE', 'OBJETO', 'VALOR_TOTAL', 'ATO_NORMATIVO', 'ORGAO_EXECUTOR', 'LOCALIDADE_BENEFICIADA', 'BENEFICIARIO_FINAL', 'BANCO', 'AGENCIA', 'CONTA', 'TIPO_CONTA'];
+$('btnModeloEmendas').addEventListener('click', () => {
+  const exemplo = {
+    ESFERA: 'municipal', EXERCICIO: 2026, NUMERO_EMENDA: '0001/2026', AUTOR: 'Nome do parlamentar',
+    PARTIDO_UNIDADE: 'PARTIDO/UF', OBJETO: 'Descrição do objeto da emenda', VALOR_TOTAL: 100000,
+    ATO_NORMATIVO: 'LOA 2026, art. 12', ORGAO_EXECUTOR: 'Secretaria Municipal de Obras',
+    LOCALIDADE_BENEFICIADA: 'Sede do município', BENEFICIARIO_FINAL: 'Escola Municipal X',
+    BANCO: 'Banco do Brasil', AGENCIA: '1234-5', CONTA: '67890-1', TIPO_CONTA: 'corrente'
+  };
+  const ws = XLSX.utils.json_to_sheet([exemplo], { header: COLUNAS_IMPORT_EMENDA });
+  const wsInstrucoes = XLSX.utils.aoa_to_sheet([
+    ['Instruções para importação de emendas'], [''],
+    ['Preencha uma linha por emenda. Uma emenda já existente (mesmo NUMERO_EMENDA + EXERCICIO) não é importada de novo.'],
+    ['ESFERA = federal, estadual ou municipal'], ['EXERCICIO = ano do exercício financeiro'],
+    ['NUMERO_EMENDA = número/código da emenda'], ['AUTOR = nome do parlamentar proponente'],
+    ['PARTIDO_UNIDADE = partido/unidade do parlamentar'], ['OBJETO = descrição do objeto'],
+    ['VALOR_TOTAL = valor alocado (número, sem R$)'], ['ATO_NORMATIVO = LOA/crédito adicional vinculado'],
+    ['ORGAO_EXECUTOR = órgão/entidade executora'], ['LOCALIDADE_BENEFICIADA = município/bairro/órgão beneficiado'],
+    ['BENEFICIARIO_FINAL = quem recebe o recurso de fato'],
+    ['BANCO, AGENCIA, CONTA, TIPO_CONTA = dados bancários (opcional; TIPO_CONTA = corrente, poupanca ou especifica)'],
+    ['Metas físicas, cronograma e instrumentos vinculados não vêm da planilha — cadastre depois, direto na emenda.'],
+  ]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsInstrucoes, 'Instruções');
+  XLSX.utils.book_append_sheet(wb, ws, 'Emendas');
+  XLSX.writeFile(wb, 'modelo_importacao_emendas.xlsx');
+});
+$('btnImportarEmendas').addEventListener('click', () => $('emImportarArquivo').click());
+$('emImportarArquivo').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const log = $('importEmendasLog');
+  log.style.display = 'block'; log.textContent = 'Lendo planilha...\n';
+  try {
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type: 'array' });
+    const ws = wb.Sheets[wb.SheetNames.includes('Emendas') ? 'Emendas' : wb.SheetNames[0]];
+    const linhas = XLSX.utils.sheet_to_json(ws, { defval: '' }).map(obj => {
+      const norm = {}; Object.entries(obj).forEach(([k, v]) => norm[String(k).trim().toUpperCase()] = v); return norm;
+    });
+    if (!linhas.length) { log.textContent += 'Planilha vazia.'; return; }
+    const existentes = new Set(state.emendas.map(em => `${em.numeroEmenda}|${em.exercicio}`.toLowerCase()));
+    let criadas = 0, duplicadas = 0, comErro = 0;
+    for (const linha of linhas) {
+      const numeroEmenda = String(linha.NUMERO_EMENDA || '').trim();
+      const exercicio = Number(linha.EXERCICIO) || new Date().getFullYear();
+      if (!numeroEmenda) { comErro++; continue; }
+      const chave = `${numeroEmenda}|${exercicio}`.toLowerCase();
+      if (existentes.has(chave)) { duplicadas++; continue; }
+      try {
+        const nova = novaEmendaVazia();
+        Object.assign(nova, {
+          esfera: (String(linha.ESFERA || 'municipal').trim().toLowerCase()) || 'municipal', exercicio, numeroEmenda,
+          autorEmenda: String(linha.AUTOR || '').trim(), partidoUnidade: String(linha.PARTIDO_UNIDADE || '').trim(),
+          objeto: String(linha.OBJETO || '').trim(), valorTotal: Number(linha.VALOR_TOTAL) || 0,
+          atoNormativoOrcamentario: String(linha.ATO_NORMATIVO || '').trim(), orgaoEntidadeExecutora: String(linha.ORGAO_EXECUTOR || '').trim(),
+          localidadeBeneficiada: String(linha.LOCALIDADE_BENEFICIADA || '').trim(), beneficiarioFinal: String(linha.BENEFICIARIO_FINAL || '').trim(),
+          dadosBancarios: { banco: String(linha.BANCO || '').trim(), agencia: String(linha.AGENCIA || '').trim(), conta: String(linha.CONTA || '').trim(), tipoConta: String(linha.TIPO_CONTA || '').trim() },
+        });
+        delete nova.id;
+        await addDoc(collection(db, 'entes', state.enteAtualId, 'emendas'), { ...nova, criadoEm: serverTimestamp(), origemImportacao: true });
+        existentes.add(chave);
+        criadas++;
+      } catch (err) { comErro++; }
+    }
+    log.textContent += `Concluído: ${criadas} emenda(s) importada(s), ${duplicadas} já existiam (ignoradas), ${comErro} com erro/sem número.`;
+    toast(`Importação concluída: ${criadas} emenda(s) nova(s).`);
+    await carregarEmendas();
+    renderEmendasLista();
+  } catch (err) {
+    log.textContent += 'Erro: ' + err.message;
+  } finally {
+    $('emImportarArquivo').value = '';
+  }
+});
+
 function novaEmendaVazia() {
   return {
     esfera: 'municipal', exercicio: new Date().getFullYear(), numeroEmenda: '', autorEmenda: '',
     partidoUnidade: '', objeto: '', valorTotal: 0, atoNormativoOrcamentario: '', orgaoEntidadeExecutora: '',
     localidadeBeneficiada: '', beneficiarioFinal: '', prazoEstimadoImplementacao: '',
-    metaFisica: { descricao: '', quantidadePrevista: 0, unidade: '' },
+    dadosBancarios: { banco: '', agencia: '', conta: '', tipoConta: '' },
+    metas: [],
     cronogramaFisicoFinanceiro: [], instrumentosVinculados: [],
-    resumoExecucao: { totalEmpenhado: 0, totalLiquidado: 0, totalPago: 0, percFisicoAtual: 0, percFinanceiroAtual: 0, qtdEtapas: 0, qtdComDocumento: 0, ultimaQuantidadeRealizada: 0 },
+    resumoExecucao: { totalEmpenhado: 0, totalLiquidado: 0, totalPago: 0, totalReceita: 0, percFisicoAtual: 0, percFinanceiroAtual: 0, qtdDespesas: 0, qtdReceitas: 0, qtdComDocumento: 0, metas: [] },
     status: 'cadastrada', publicoTransparencia: false
   };
 }
@@ -450,22 +529,24 @@ async function abrirEmenda(id) {
     $('btnExcluirEmenda').style.display = podeEditar() ? '' : 'none';
     $('cardConformidadeEmenda').style.display = '';
     $('cardRastreabilidadeEmenda').style.display = '';
-    $('cardExecucao').style.display = '';
-    await carregarExecucoes(id);
+    $('cardDespesas').style.display = '';
+    $('cardReceitas').style.display = '';
+    await Promise.all([carregarDespesas(id), carregarReceitas(id)]);
   } else {
     state.emendaEmEdicao = novaEmendaVazia();
     $('emendaFormTitulo').textContent = 'Nova Emenda';
     $('btnExcluirEmenda').style.display = 'none';
     $('cardConformidadeEmenda').style.display = 'none';
     $('cardRastreabilidadeEmenda').style.display = 'none';
-    $('cardExecucao').style.display = 'none';
-    state.execucoesAtual = [];
+    $('cardDespesas').style.display = 'none';
+    $('cardReceitas').style.display = 'none';
+    state.despesasAtual = []; state.receitasAtual = [];
   }
   preencherFormEmenda();
   const editavel = podeEditar();
   ['fEsfera', 'fExercicio', 'fNumeroEmenda', 'fAutorEmenda', 'fPartidoUnidade', 'fObjeto', 'fValorTotal',
-    'fAtoNormativo', 'fOrgaoExecutor', 'fLocalidade', 'fBeneficiarioFinal', 'fPrazoEstimado', 'fMetaDescricao',
-    'fMetaQuantidade', 'fMetaUnidade', 'fPublico'].forEach(id => $(id).disabled = !editavel);
+    'fAtoNormativo', 'fOrgaoExecutor', 'fLocalidade', 'fBeneficiarioFinal', 'fPrazoEstimado', 'fPublico',
+    'fBancoNome', 'fBancoAgencia', 'fBancoConta', 'fBancoTipoConta'].forEach(id => $(id).disabled = !editavel);
   $('btnSalvarEmenda').style.display = editavel ? '' : 'none';
   mostrarTela('emendaForm');
 }
@@ -479,10 +560,11 @@ function preencherFormEmenda() {
   $('fAtoNormativo').value = e.atoNormativoOrcamentario; $('fOrgaoExecutor').value = e.orgaoEntidadeExecutora;
   $('fLocalidade').value = e.localidadeBeneficiada; $('fPrazoEstimado').value = e.prazoEstimadoImplementacao || '';
   $('fBeneficiarioFinal').value = e.beneficiarioFinal || '';
-  const meta = e.metaFisica || {};
-  $('fMetaDescricao').value = meta.descricao || ''; $('fMetaQuantidade').value = meta.quantidadePrevista || ''; $('fMetaUnidade').value = meta.unidade || '';
+  const banco = e.dadosBancarios || {};
+  $('fBancoNome').value = banco.banco || ''; $('fBancoAgencia').value = banco.agencia || '';
+  $('fBancoConta').value = banco.conta || ''; $('fBancoTipoConta').value = banco.tipoConta || '';
   $('fPublico').checked = !!e.publicoTransparencia;
-  renderCronograma(); renderInstrumentos();
+  renderCronograma(); renderInstrumentos(); renderMetas();
   if (state.editandoEmendaId) renderChecklistEmenda();
 }
 function lerFormParaEmenda() {
@@ -494,8 +576,33 @@ function lerFormParaEmenda() {
   e.orgaoEntidadeExecutora = $('fOrgaoExecutor').value.trim(); e.localidadeBeneficiada = $('fLocalidade').value.trim();
   e.prazoEstimadoImplementacao = $('fPrazoEstimado').value; e.publicoTransparencia = $('fPublico').checked;
   e.beneficiarioFinal = $('fBeneficiarioFinal').value.trim();
-  e.metaFisica = { descricao: $('fMetaDescricao').value.trim(), quantidadePrevista: Number($('fMetaQuantidade').value) || 0, unidade: $('fMetaUnidade').value.trim() };
+  e.dadosBancarios = {
+    banco: $('fBancoNome').value.trim(), agencia: $('fBancoAgencia').value.trim(),
+    conta: $('fBancoConta').value.trim(), tipoConta: $('fBancoTipoConta').value
+  };
+  // e.metas já vem atualizado direto pelos campos da lista dinâmica (ver renderMetas)
 }
+
+// ---- metas físicas (lista dinâmica, uma emenda pode ter várias) ----
+function idCurto() { return Math.random().toString(36).slice(2, 10); }
+function renderMetas() {
+  const lista = state.emendaEmEdicao.metas || [];
+  $('metasLista').innerHTML = lista.map((m, i) => `
+    <div class="cronograma-row">
+      <div class="field"><input type="text" placeholder="Descrição da meta (ex: famílias atendidas)" value="${m.descricao || ''}" data-meta-desc="${i}"></div>
+      <div class="field" style="max-width:120px;"><input type="number" step="0.01" placeholder="Quantidade" value="${m.quantidadePrevista || ''}" data-meta-qtd="${i}"></div>
+      <div class="field" style="max-width:110px;"><input type="text" placeholder="Unidade" value="${m.unidade || ''}" data-meta-un="${i}"></div>
+      <button class="btn btn-sm btn-danger" data-meta-rm="${i}">✕</button>
+    </div>`).join('');
+  document.querySelectorAll('[data-meta-desc]').forEach(el => el.addEventListener('input', e => lista[e.target.dataset.metaDesc].descricao = e.target.value));
+  document.querySelectorAll('[data-meta-qtd]').forEach(el => el.addEventListener('input', e => lista[e.target.dataset.metaQtd].quantidadePrevista = Number(e.target.value) || 0));
+  document.querySelectorAll('[data-meta-un]').forEach(el => el.addEventListener('input', e => lista[e.target.dataset.metaUn].unidade = e.target.value));
+  document.querySelectorAll('[data-meta-rm]').forEach(el => el.addEventListener('click', e => { lista.splice(Number(e.target.dataset.metaRm), 1); renderMetas(); }));
+}
+$('btnAddMeta').addEventListener('click', () => {
+  (state.emendaEmEdicao.metas ||= []).push({ id: idCurto(), descricao: '', quantidadePrevista: 0, unidade: '' });
+  renderMetas();
+});
 
 // ---- cronograma físico-financeiro (lista dinâmica) ----
 function renderCronograma() {
@@ -550,16 +657,20 @@ function renderChecklistEmenda() {
   $('checklistRastreabilidade').innerHTML = itemsRastreio.map(i => `
     <div class="checklist-item"><span class="checklist-dot ${i.ok === null ? 'dot-na' : i.ok ? 'dot-ok' : 'dot-fail'}"></span>${i.label}</div>
   `).join('');
-  const meta = e.metaFisica || {};
-  const resumo = e.resumoExecucao || {};
-  if (meta.descricao && meta.quantidadePrevista > 0) {
-    const atingido = resumo.ultimaQuantidadeRealizada || 0;
-    const percAtingido = Math.min(100, Math.round((atingido / meta.quantidadePrevista) * 1000) / 10);
-    $('metaBarFill').style.width = percAtingido + '%';
-    $('metaResumoTexto').textContent = `Meta: ${meta.descricao} — ${atingido} de ${meta.quantidadePrevista} ${meta.unidade || ''} (${percAtingido}% atingido)`;
+  const metas = e.metas || [];
+  const resumoMetas = (e.resumoExecucao && e.resumoExecucao.metas) || [];
+  if (metas.length) {
+    $('metasResumoLista').innerHTML = metas.map(m => {
+      const r = resumoMetas.find(x => x.id === m.id) || {};
+      const realizado = r.quantidadeRealizada || 0;
+      const pctM = m.quantidadePrevista > 0 ? Math.min(100, Math.round((realizado / m.quantidadePrevista) * 1000) / 10) : 0;
+      return `<div style="margin-bottom:10px;">
+        <div class="screen-sub">${m.descricao || 'Meta sem descrição'} — ${realizado} de ${m.quantidadePrevista || 0} ${m.unidade || ''} (${pctM}% atingido)</div>
+        <div class="conf-bar-track"><div class="conf-bar-fill" style="width:${pctM}%; background:var(--cyan);"></div></div>
+      </div>`;
+    }).join('');
   } else {
-    $('metaBarFill').style.width = '0%';
-    $('metaResumoTexto').textContent = 'Sem meta física cadastrada.';
+    $('metasResumoLista').innerHTML = '<div class="screen-sub">Sem metas físicas cadastradas.</div>';
   }
 }
 $('btnEmitirCertidao').addEventListener('click', () => emitirCertidaoPdf(state.emendaEmEdicao));
@@ -597,116 +708,240 @@ $('btnExcluirEmenda').addEventListener('click', () => {
 });
 
 // ============================================================
-// EXECUÇÃO FÍSICO-FINANCEIRA (subcoleção da emenda)
+// DESPESAS (empenho+liquidação+pagamento num registro só) e RECEITAS
+// subcoleções da emenda
 // ============================================================
-async function carregarExecucoes(emendaId) {
-  const snap = await getDocs(query(collection(db, 'entes', state.enteAtualId, 'emendas', emendaId, 'execucoes'), orderBy('data', 'desc')));
-  state.execucoesAtual = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-  renderExecucoes();
+async function carregarDespesas(emendaId) {
+  const snap = await getDocs(query(collection(db, 'entes', state.enteAtualId, 'emendas', emendaId, 'despesas'), orderBy('dataPagamento', 'desc')));
+  state.despesasAtual = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  renderDespesas();
 }
-const ETAPA_LABEL = { empenho: 'Empenho', liquidacao: 'Liquidação', pagamento: 'Pagamento' };
-function renderExecucoes() {
+async function carregarReceitas(emendaId) {
+  const snap = await getDocs(query(collection(db, 'entes', state.enteAtualId, 'emendas', emendaId, 'receitas'), orderBy('data', 'desc')));
+  state.receitasAtual = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+  renderReceitas();
+}
+function statusDespesa(x) { return (x.valorPago > 0) ? 'Liquidada/Paga' : 'Empenhada'; }
+function renderDespesas() {
   const editavel = podeEditar();
-  $('execucoesLista').innerHTML = state.execucoesAtual.length ? state.execucoesAtual.map(x => `
-    <div class="exec-item">
+  const emenda = state.emendas.find(e => e.id === state.editandoEmendaId) || {};
+  const metasPorId = Object.fromEntries((emenda.metas || []).map(m => [m.id, m]));
+  $('despesasLista').innerHTML = state.despesasAtual.length ? state.despesasAtual.map(x => {
+    const metasTxt = (x.metasVinculadas || []).map(mv => {
+      const m = metasPorId[mv.metaId];
+      return `Meta "${m ? m.descricao : mv.metaId}": +${mv.quantidade} ${m ? m.unidade || '' : ''}`;
+    }).join(' · ');
+    return `<div class="exec-item">
       <div class="exec-item-head">
-        <strong>${ETAPA_LABEL[x.etapa] || x.etapa} — ${fmtBRL(x.valor)}</strong>
-        <span class="screen-sub">${x.data ? new Date(x.data + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</span>
+        <strong>Empenho ${x.numeroEmpenho || '—'} — ${x.credorNome || 'sem credor'}</strong>
+        <span class="badge ${x.valorPago > 0 ? 'badge-green' : 'badge-amber'}">${statusDespesa(x)}</span>
       </div>
-      <div class="screen-sub">Físico: ${x.percentualFisicoAcumulado ?? '—'}% · Financeiro: ${x.percentualFinanceiroAcumulado ?? '—'}%</div>
-      ${x.quantidadeRealizadaAcumulada ? `<div class="screen-sub">Meta física realizada até aqui: ${x.quantidadeRealizadaAcumulada}</div>` : ''}
-      ${x.documentoComprobatorioArquivo ? `<div class="screen-sub"><a href="${x.documentoComprobatorioArquivo}" download="${x.documentoComprobatorioNome || 'comprovante'}">📎 ${x.documentoComprobatorioNome || 'Ver comprovante anexado'}</a></div>` : ''}
+      <div class="screen-sub">Empenhado: ${fmtBRL(x.valorEmpenho)} · Liquidado/Pago: ${fmtBRL(x.valorPago)} ${x.dataPagamento ? '· ' + new Date(x.dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</div>
+      ${x.historico ? `<div class="screen-sub">${x.historico}</div>` : ''}
+      ${metasTxt ? `<div class="screen-sub">${metasTxt}</div>` : ''}
+      ${x.documentoComprobatorioArquivo ? `<div class="screen-sub"><a href="${x.documentoComprobatorioArquivo}" download="${x.documentoComprobatorioNome || 'comprovante'}">📎 ${x.documentoComprobatorioNome || 'Ver comprovante'}</a></div>` : ''}
+      ${x.documentoDriveLink ? `<div class="screen-sub"><a href="${x.documentoDriveLink}" target="_blank" rel="noopener">📎 ${x.documentoDriveNome || 'Ver no Google Drive'}</a></div>` : ''}
       ${x.observacoes ? `<div class="screen-sub">${x.observacoes}</div>` : ''}
       <div style="margin-top:8px; display:flex; gap:8px; align-items:center;">
         <span class="badge ${x.validadoPorControleInterno ? 'badge-green' : 'badge-amber'}">${x.validadoPorControleInterno ? 'Validado pelo Controle Interno' : 'Aguardando validação'}</span>
-        ${papelAtual() === 'controleInterno' && !x.validadoPorControleInterno ? `<button class="btn btn-sm" data-validar="${x.id}">Validar</button>` : ''}
-        ${editavel ? `<button class="btn btn-sm btn-danger" data-rm-exec="${x.id}" style="margin-left:auto;">Excluir</button>` : ''}
+        ${papelAtual() === 'controleInterno' && !x.validadoPorControleInterno ? `<button class="btn btn-sm" data-validar-despesa="${x.id}">Validar</button>` : ''}
+        ${editavel ? `<button class="btn btn-sm btn-danger" data-rm-despesa="${x.id}" style="margin-left:auto;">Excluir</button>` : ''}
       </div>
-    </div>`).join('') : '<div class="empty-state">Nenhuma etapa lançada ainda.</div>';
-  document.querySelectorAll('[data-validar]').forEach(b => b.addEventListener('click', () => validarExecucao(b.dataset.validar)));
-  document.querySelectorAll('[data-rm-exec]').forEach(b => b.addEventListener('click', () => excluirExecucao(b.dataset.rmExec)));
+    </div>`;
+  }).join('') : '<div class="empty-state">Nenhuma despesa lançada ainda.</div>';
+  document.querySelectorAll('[data-validar-despesa]').forEach(b => b.addEventListener('click', () => validarDespesa(b.dataset.validarDespesa)));
+  document.querySelectorAll('[data-rm-despesa]').forEach(b => b.addEventListener('click', () => excluirDespesa(b.dataset.rmDespesa)));
 }
-async function validarExecucao(execId) {
-  await updateDoc(doc(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'execucoes', execId), {
+function renderReceitas() {
+  const editavel = podeEditar();
+  $('receitasLista').innerHTML = state.receitasAtual.length ? state.receitasAtual.map(x => `
+    <div class="exec-item">
+      <div class="exec-item-head">
+        <strong>${fmtBRL(x.valor)}</strong>
+        <span class="screen-sub">${x.data ? new Date(x.data + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</span>
+      </div>
+      ${x.contaBancaria ? `<div class="screen-sub">Conta: ${x.contaBancaria}</div>` : ''}
+      ${x.origem ? `<div class="screen-sub">Origem: ${x.origem}</div>` : ''}
+      ${x.documentoComprobatorioArquivo ? `<div class="screen-sub"><a href="${x.documentoComprobatorioArquivo}" download="${x.documentoComprobatorioNome || 'comprovante'}">📎 ${x.documentoComprobatorioNome || 'Ver comprovante'}</a></div>` : ''}
+      ${x.documentoDriveLink ? `<div class="screen-sub"><a href="${x.documentoDriveLink}" target="_blank" rel="noopener">📎 ${x.documentoDriveNome || 'Ver no Google Drive'}</a></div>` : ''}
+      ${x.observacoes ? `<div class="screen-sub">${x.observacoes}</div>` : ''}
+      ${editavel ? `<div style="margin-top:8px;"><button class="btn btn-sm btn-danger" data-rm-receita="${x.id}">Excluir</button></div>` : ''}
+    </div>`).join('') : '<div class="empty-state">Nenhuma receita lançada ainda.</div>';
+  document.querySelectorAll('[data-rm-receita]').forEach(b => b.addEventListener('click', () => excluirReceita(b.dataset.rmReceita)));
+}
+async function validarDespesa(id) {
+  await updateDoc(doc(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'despesas', id), {
     validadoPorControleInterno: true, validadoPor: state.perfil?.nome || state.user.email, validadoEm: serverTimestamp()
   });
-  toast('Etapa validada.');
-  await carregarExecucoes(state.editandoEmendaId);
+  toast('Despesa validada.');
+  await carregarDespesas(state.editandoEmendaId);
 }
-function excluirExecucao(execId) {
-  confirmar('Excluir etapa', 'Remove esse lançamento de execução.', async () => {
-    await deleteDoc(doc(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'execucoes', execId));
-    toast('Etapa excluída.');
-    await carregarExecucoes(state.editandoEmendaId);
-    await recomputeResumoExecucao(state.editandoEmendaId);
+function excluirDespesa(id) {
+  confirmar('Excluir despesa', 'Remove esse lançamento de empenho/liquidação/pagamento.', async () => {
+    await deleteDoc(doc(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'despesas', id));
+    toast('Despesa excluída.');
+    await carregarDespesas(state.editandoEmendaId);
+    await recomputeResumoFinanceiro(state.editandoEmendaId);
   });
 }
-$('btnNovaExecucao').addEventListener('click', () => {
-  $('exEtapa').value = 'empenho'; $('exData').value = ''; $('exValor').value = '';
-  $('exPercFisico').value = ''; $('exPercFinanceiro').value = ''; $('exQtdRealizada').value = '';
-  $('exArquivo').value = ''; $('exArquivoAtual').textContent = ''; $('exObs').value = '';
-  $('modalExecucao').classList.add('active');
+function excluirReceita(id) {
+  confirmar('Excluir receita', 'Remove esse lançamento de receita.', async () => {
+    await deleteDoc(doc(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'receitas', id));
+    toast('Receita excluída.');
+    await carregarReceitas(state.editandoEmendaId);
+    await recomputeResumoFinanceiro(state.editandoEmendaId);
+  });
+}
+
+// ---- modal Nova Despesa ----
+$('btnNovaDespesa').addEventListener('click', () => {
+  ['dpEmpenho', 'dpParcela', 'dpCredorNome', 'dpCredorCnpj', 'dpDotacao', 'dpElemento', 'dpUnidadeNome', 'dpUnidadeCodigo',
+    'dpContaBancaria', 'dpOrdemPagamento', 'dpValorEmpenho', 'dpValorPago', 'dpDataPagamento', 'dpHistorico',
+    'dpContrato', 'dpNotaFiscal', 'dpLicitacaoModalidade', 'dpProcessoLicitatorio', 'dpObs'].forEach(id => $(id).value = '');
+  $('dpArquivo').value = ''; $('dpArquivoAtual').textContent = '';
+  $('dpArquivoHint').textContent = (state.enteDados.googleDrive && state.enteDados.googleDrive.clientId)
+    ? 'Este ente tem Google Drive configurado — o arquivo vai direto pra lá (sem limite de 600KB). Vai pedir login do Google na hora de salvar.'
+    : 'Anexado direto no cadastro — limite de ~600KB por arquivo (configure o Google Drive em Dados do Ente pra anexar arquivos maiores).';
+  const emenda = state.emendas.find(e => e.id === state.editandoEmendaId) || {};
+  const metas = emenda.metas || [];
+  if (metas.length) {
+    $('dpMetasWrap').style.display = '';
+    $('dpMetasVinculacao').innerHTML = metas.map(m => `
+      <div class="field" style="margin-bottom:8px;">
+        <label style="font-weight:400;">${m.descricao || 'Meta'} (${m.unidade || ''})</label>
+        <input type="number" step="0.01" data-meta-vinc="${m.id}" placeholder="Quantidade entregue nesta despesa">
+      </div>`).join('');
+  } else {
+    $('dpMetasWrap').style.display = 'none';
+    $('dpMetasVinculacao').innerHTML = '';
+  }
+  $('modalDespesa').classList.add('active');
 });
+$('btnCancelarDespesa').addEventListener('click', () => $('modalDespesa').classList.remove('active'));
+$('btnSalvarDespesa').addEventListener('click', async () => {
+  const numeroEmpenho = $('dpEmpenho').value.trim(), credorNome = $('dpCredorNome').value.trim();
+  const valorEmpenho = Number($('dpValorEmpenho').value) || 0;
+  if (!numeroEmpenho || !credorNome || !valorEmpenho) { toast('Preencha nº do empenho, credor e valor do empenho.', true); return; }
+  const btn = $('btnSalvarDespesa'); btn.disabled = true;
+  try {
+    const anexo = await processarAnexo($('dpArquivo').files[0]);
+    const metasVinculadas = [];
+    document.querySelectorAll('[data-meta-vinc]').forEach(el => {
+      const q = Number(el.value) || 0;
+      if (q > 0) metasVinculadas.push({ metaId: el.dataset.metaVinc, quantidade: q });
+    });
+    const emenda = state.emendas.find(e => e.id === state.editandoEmendaId);
+    const parcela = $('dpParcela').value.trim();
+    await addDoc(collection(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'despesas'), {
+      numeroEmpenho, parcela, credorNome, credorCnpj: $('dpCredorCnpj').value.trim(),
+      dotacaoOrcamentaria: $('dpDotacao').value.trim(), elementoDespesa: $('dpElemento').value.trim(),
+      unidadeOrcamentariaNome: $('dpUnidadeNome').value.trim(), unidadeOrcamentariaCodigo: $('dpUnidadeCodigo').value.trim(),
+      contaBancaria: $('dpContaBancaria').value.trim(), ordemPagamento: $('dpOrdemPagamento').value.trim(),
+      valorEmpenho, valorPago: Number($('dpValorPago').value) || 0, dataPagamento: $('dpDataPagamento').value,
+      historico: $('dpHistorico').value.trim(), contrato: $('dpContrato').value.trim(),
+      notaFiscal: $('dpNotaFiscal').value.trim(), licitacaoModalidade: $('dpLicitacaoModalidade').value.trim(),
+      processoLicitatorio: $('dpProcessoLicitatorio').value.trim(),
+      ano: emenda?.exercicio || new Date().getFullYear(), metasVinculadas,
+      chaveImportacao: chaveDespesa({ numeroEmpenho, parcela, notaFiscal: $('dpNotaFiscal').value.trim() }),
+      ...anexo,
+      observacoes: $('dpObs').value.trim(),
+      validadoPorControleInterno: false, criadoEm: serverTimestamp(), criadoPor: state.user.uid
+    });
+    $('modalDespesa').classList.remove('active');
+    toast('Despesa lançada!');
+    await carregarDespesas(state.editandoEmendaId);
+    await recomputeResumoFinanceiro(state.editandoEmendaId);
+  } catch (err) {
+    toast(err.message, true);
+  } finally { btn.disabled = false; }
+});
+function chaveDespesa({ numeroEmpenho, parcela, notaFiscal }) {
+  return `${(numeroEmpenho || '').trim()}|${(parcela || '').trim()}|${(notaFiscal || '').trim()}`.toLowerCase();
+}
 // Lê um arquivo pequeno (comprovante) como base64 direto no navegador — sem
 // Storage pago, mesma lógica usada pra logos no app da igreja. Limite baixo
-// porque o documento inteiro da emenda tem teto de 1MB no Firestore.
+// porque o documento inteiro da despesa tem teto de 1MB no Firestore.
 function lerArquivoComoBase64(file) {
   return new Promise((resolve, reject) => {
-    if (file.size > 600 * 1024) { reject(new Error('Arquivo maior que 600KB — reduza o tamanho (ex: comprima o PDF/foto) e tente de novo.')); return; }
+    if (file.size > 600 * 1024) { reject(new Error('Arquivo maior que 600KB — reduza o tamanho (ex: comprima o PDF/foto), ou configure o Google Drive em Dados do Ente pra anexar arquivos maiores.')); return; }
     const reader = new FileReader();
     reader.onload = () => resolve(reader.result);
     reader.onerror = () => reject(new Error('Não foi possível ler o arquivo.'));
     reader.readAsDataURL(file);
   });
 }
-$('btnCancelarExecucao').addEventListener('click', () => $('modalExecucao').classList.remove('active'));
-$('btnSalvarExecucao').addEventListener('click', async () => {
-  const etapa = $('exEtapa').value, data = $('exData').value, valor = Number($('exValor').value);
+
+// ---- modal Nova Receita ----
+$('btnNovaReceita').addEventListener('click', () => {
+  $('rcData').value = ''; $('rcValor').value = ''; $('rcContaBancaria').value = '';
+  $('rcOrigem').value = ''; $('rcArquivo').value = ''; $('rcObs').value = '';
+  $('rcArquivoHint').textContent = (state.enteDados.googleDrive && state.enteDados.googleDrive.clientId)
+    ? 'Este ente tem Google Drive configurado — o arquivo vai direto pra lá (sem limite de 600KB).'
+    : 'Anexado direto no cadastro — limite de ~600KB por arquivo.';
+  $('modalReceita').classList.add('active');
+});
+$('btnCancelarReceita').addEventListener('click', () => $('modalReceita').classList.remove('active'));
+$('btnSalvarReceita').addEventListener('click', async () => {
+  const data = $('rcData').value, valor = Number($('rcValor').value);
   if (!data || !valor) { toast('Preencha data e valor.', true); return; }
-  const btn = $('btnSalvarExecucao'); btn.disabled = true;
+  const btn = $('btnSalvarReceita'); btn.disabled = true;
   try {
-    let arquivoBase64 = null, arquivoNome = null, arquivoTipo = null;
-    const arquivo = $('exArquivo').files[0];
-    if (arquivo) {
-      arquivoBase64 = await lerArquivoComoBase64(arquivo);
-      arquivoNome = arquivo.name; arquivoTipo = arquivo.type;
-    }
+    const anexo = await processarAnexo($('rcArquivo').files[0]);
     const emenda = state.emendas.find(e => e.id === state.editandoEmendaId);
-    await addDoc(collection(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'execucoes'), {
-      etapa, data, valor, ano: emenda?.exercicio || new Date().getFullYear(),
-      percentualFisicoAcumulado: Number($('exPercFisico').value) || 0,
-      percentualFinanceiroAcumulado: Number($('exPercFinanceiro').value) || 0,
-      quantidadeRealizadaAcumulada: Number($('exQtdRealizada').value) || 0,
-      documentoComprobatorioArquivo: arquivoBase64, documentoComprobatorioNome: arquivoNome, documentoComprobatorioTipo: arquivoTipo,
-      observacoes: $('exObs').value.trim(),
-      validadoPorControleInterno: false, criadoEm: serverTimestamp(), criadoPor: state.user.uid
+    await addDoc(collection(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'receitas'), {
+      data, valor, contaBancaria: $('rcContaBancaria').value.trim(), origem: $('rcOrigem').value.trim(),
+      ano: emenda?.exercicio || new Date().getFullYear(),
+      ...anexo,
+      observacoes: $('rcObs').value.trim(), criadoEm: serverTimestamp(), criadoPor: state.user.uid
     });
-    $('modalExecucao').classList.remove('active');
-    toast('Etapa lançada!');
-    await carregarExecucoes(state.editandoEmendaId);
-    await recomputeResumoExecucao(state.editandoEmendaId);
+    $('modalReceita').classList.remove('active');
+    toast('Receita lançada!');
+    await carregarReceitas(state.editandoEmendaId);
+    await recomputeResumoFinanceiro(state.editandoEmendaId);
   } catch (err) {
     toast(err.message, true);
   } finally { btn.disabled = false; }
 });
 
-// Denormaliza os totais de execução no próprio documento da emenda — assim
-// o Painel, a Conformidade e o Acompanhamento Consolidado não precisam
-// reler todas as subcoleções de execução de cada emenda pra montar a tela.
-async function recomputeResumoExecucao(emendaId) {
-  const snap = await getDocs(collection(db, 'entes', state.enteAtualId, 'emendas', emendaId, 'execucoes'));
-  const execs = snap.docs.map(d => d.data());
-  const soma = (etapa) => execs.filter(x => x.etapa === etapa).reduce((s, x) => s + (x.valor || 0), 0);
-  const porData = [...execs].sort((a, b) => (a.data || '').localeCompare(b.data || ''));
-  const ultimaComFisico = [...porData].reverse().find(x => x.percentualFisicoAcumulado > 0);
-  const ultimaComFinanceiro = [...porData].reverse().find(x => x.percentualFinanceiroAcumulado > 0);
-  const ultimaComMeta = [...porData].reverse().find(x => x.quantidadeRealizadaAcumulada > 0);
+// Denormaliza os totais de despesas/receitas no próprio documento da
+// emenda — assim o Painel, a Conformidade e o Acompanhamento Consolidado
+// não precisam reler todas as subcoleções de cada emenda pra montar a tela.
+async function recomputeResumoFinanceiro(emendaId) {
+  const [despSnap, recSnap] = await Promise.all([
+    getDocs(collection(db, 'entes', state.enteAtualId, 'emendas', emendaId, 'despesas')),
+    getDocs(collection(db, 'entes', state.enteAtualId, 'emendas', emendaId, 'receitas')),
+  ]);
+  const despesas = despSnap.docs.map(d => d.data());
+  const receitas = recSnap.docs.map(d => d.data());
+  const emenda = state.emendas.find(e => e.id === emendaId) || {};
+  const metasDefinidas = emenda.metas || [];
+
+  const totalEmpenhado = despesas.reduce((s, x) => s + (x.valorEmpenho || 0), 0);
+  const totalPago = despesas.reduce((s, x) => s + (x.valorPago || 0), 0);
+  const totalReceita = receitas.reduce((s, x) => s + (x.valor || 0), 0);
+
+  let percFisicoAtual = 0, metasResumo = [];
+  if (metasDefinidas.length) {
+    // Execução física = média do % de atendimento de cada meta, somando a
+    // quantidade entregue por TODAS as despesas vinculadas àquela meta.
+    metasResumo = metasDefinidas.map(m => {
+      const quantidadeRealizada = despesas.reduce((s, x) => {
+        const v = (x.metasVinculadas || []).find(mv => mv.metaId === m.id);
+        return s + (v ? v.quantidade : 0);
+      }, 0);
+      const percentual = m.quantidadePrevista > 0 ? Math.min(100, Math.round((quantidadeRealizada / m.quantidadePrevista) * 1000) / 10) : 0;
+      return { id: m.id, descricao: m.descricao, unidade: m.unidade, quantidadePrevista: m.quantidadePrevista, quantidadeRealizada, percentual };
+    });
+    percFisicoAtual = Math.round((metasResumo.reduce((s, m) => s + m.percentual, 0) / metasResumo.length) * 10) / 10;
+  }
+  // % financeiro agora também é automático: valor pago sobre o valor total da emenda.
+  const percFinanceiroAtual = emenda.valorTotal > 0 ? Math.min(100, Math.round((totalPago / emenda.valorTotal) * 1000) / 10) : 0;
+
   const resumo = {
-    totalEmpenhado: soma('empenho'), totalLiquidado: soma('liquidacao'), totalPago: soma('pagamento'),
-    percFisicoAtual: ultimaComFisico ? ultimaComFisico.percentualFisicoAcumulado : 0,
-    percFinanceiroAtual: ultimaComFinanceiro ? ultimaComFinanceiro.percentualFinanceiroAcumulado : 0,
-    ultimaQuantidadeRealizada: ultimaComMeta ? ultimaComMeta.quantidadeRealizadaAcumulada : 0,
-    qtdEtapas: execs.length, qtdComDocumento: execs.filter(x => !!x.documentoComprobatorioArquivo).length,
+    totalEmpenhado, totalLiquidado: totalPago, totalPago, totalReceita,
+    percFisicoAtual, percFinanceiroAtual, metas: metasResumo,
+    qtdDespesas: despesas.length, qtdReceitas: receitas.length,
+    qtdComDocumento: despesas.filter(x => !!x.documentoComprobatorioArquivo || !!x.documentoDriveLink).length,
     atualizadoEm: serverTimestamp()
   };
   await updateDoc(doc(db, 'entes', state.enteAtualId, 'emendas', emendaId), { resumoExecucao: resumo });
@@ -714,6 +949,123 @@ async function recomputeResumoExecucao(emendaId) {
   if (idx >= 0) state.emendas[idx].resumoExecucao = resumo;
   if (state.emendaEmEdicao && state.editandoEmendaId === emendaId) { state.emendaEmEdicao.resumoExecucao = resumo; renderChecklistEmenda(); }
 }
+
+// ---- Importação de despesas por planilha (empenho/liquidação/pagamento) ----
+// Aceita o mesmo formato exportado pelos sistemas contábeis municipais
+// (colunas em maiúsculas: EMPENHO, NOME, CFPRO, CATEC, UNIDADENOME,
+// UNIDADE, CONTAC, VAPAG, ORDPG, DTLAN, HISTORICO, CONTRATO, LICMOD,
+// PROCLIC, NOTAFISCAL, VALOREMPENHO, CNPJFORNECEDOR, PARCELA).
+const COLUNAS_IMPORT_DESPESA = ['EMPENHO', 'NOME', 'CFPRO', 'CATEC', 'UNIDADENOME', 'UNIDADE', 'CONTAC', 'VAPAG', 'ORDPG', 'DTLAN', 'HISTORICO', 'CONTRATO', 'LICMOD', 'PROCLIC', 'NOTAFISCAL', 'VALOREMPENHO', 'CNPJFORNECEDOR', 'PARCELA'];
+function parseValorBR(v) {
+  if (v == null || v === '') return 0;
+  const s = String(v).trim();
+  if (s.includes(',')) return Number(s.replace(/\./g, '').replace(',', '.')) || 0;
+  return Number(s) || 0;
+}
+function parseDataBR(v) {
+  if (!v) return '';
+  const s = String(v).trim();
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return `${m[3]}-${m[2].padStart(2, '0')}-${m[1].padStart(2, '0')}`;
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  return '';
+}
+async function lerPlanilhaGenerica(file) {
+  if (file.name.toLowerCase().endsWith('.csv')) {
+    const texto = await file.text();
+    const linhas = texto.replace(/\r/g, '').split('\n').filter(l => l.trim() !== '');
+    if (!linhas.length) return [];
+    const headers = linhas[0].replace(/^\uFEFF/, '').split(';').map(h => h.trim().toUpperCase());
+    return linhas.slice(1).map(linha => {
+      const cols = linha.split(';');
+      const obj = {};
+      headers.forEach((h, i) => obj[h] = (cols[i] || '').trim());
+      return obj;
+    });
+  }
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  const linhas = XLSX.utils.sheet_to_json(ws, { defval: '' });
+  return linhas.map(obj => {
+    const norm = {};
+    Object.entries(obj).forEach(([k, v]) => norm[String(k).trim().toUpperCase()] = v);
+    return norm;
+  });
+}
+$('btnModeloDespesas').addEventListener('click', () => {
+  const exemplo = { EMPENHO: '427001', NOME: 'PONTES EMPREENDIMENTOS LTDA', CFPRO: '15.451.000.712.500.000', CATEC: '4.4.90.51.01', UNIDADENOME: 'SEC MUN INFRAESTRUTURA', UNIDADE: '20900', CONTAC: '59.702-3', VAPAG: '7854,04', ORDPG: '430037', DTLAN: '30/04/2025', HISTORICO: 'Descrição do objeto da despesa', CONTRATO: '0061/24', LICMOD: 'CONCORRÊNCIA ELETRÔNICA 0001/24', PROCLIC: '000050/24', NOTAFISCAL: '000000000050-NFSe', VALOREMPENHO: '16458,69', CNPJFORNECEDOR: '40.141.083/0001-53', PARCELA: '427001-1' };
+  const ws = XLSX.utils.json_to_sheet([exemplo], { header: COLUNAS_IMPORT_DESPESA });
+  const wsInstrucoes = XLSX.utils.aoa_to_sheet([
+    ['Instruções para importação de despesas'],
+    [''],
+    ['Preencha uma linha por despesa (empenho + liquidação + pagamento juntos).'],
+    ['Datas no formato DD/MM/AAAA. Valores decimais com vírgula (ex: 1234,56).'],
+    ['PARCELA precisa ser único por lançamento — é usado para não importar a mesma despesa duas vezes.'],
+    ['EMPENHO = número do empenho'], ['NOME = nome do credor/fornecedor'],
+    ['CFPRO = dotação orçamentária (99.999.9999.9999.9999)'], ['CATEC = elemento de despesa (9.9.99.99.99)'],
+    ['UNIDADENOME = nome da unidade orçamentária'], ['UNIDADE = código da unidade orçamentária'],
+    ['CONTAC = conta bancária'], ['VAPAG = valor da liquidação/pagamento'], ['ORDPG = ordem de pagamento'],
+    ['DTLAN = data do pagamento'], ['HISTORICO = objeto da despesa'], ['CONTRATO = contrato vinculado'],
+    ['LICMOD = modalidade de licitação'], ['PROCLIC = processo licitatório'], ['NOTAFISCAL = número da nota fiscal'],
+    ['VALOREMPENHO = valor do empenho'], ['CNPJFORNECEDOR = CNPJ do credor/fornecedor'],
+    ['PARCELA = identificador único da parcela/liquidação'],
+  ]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, wsInstrucoes, 'Instruções');
+  XLSX.utils.book_append_sheet(wb, ws, 'Despesas');
+  XLSX.writeFile(wb, 'modelo_importacao_despesas.xlsx');
+});
+$('btnImportarDespesas').addEventListener('click', () => $('dpImportarArquivo').click());
+$('dpImportarArquivo').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const log = $('importDespesasLog');
+  log.style.display = 'block'; log.textContent = 'Lendo planilha...\n';
+  try {
+    const linhas = await lerPlanilhaGenerica(file);
+    if (!linhas.length) { log.textContent += 'Planilha vazia.'; return; }
+    const faltando = COLUNAS_IMPORT_DESPESA.filter(c => !(c in linhas[0]));
+    if (faltando.length) { log.textContent += `Colunas faltando na planilha: ${faltando.join(', ')}`; return; }
+
+    const emenda = state.emendas.find(e => e.id === state.editandoEmendaId);
+    const chavesExistentes = new Set(state.despesasAtual.map(x => x.chaveImportacao).filter(Boolean));
+    let criadas = 0, duplicadas = 0, comErro = 0;
+    for (const linha of linhas) {
+      const numeroEmpenho = String(linha.EMPENHO || '').trim();
+      const parcela = String(linha.PARCELA || '').trim();
+      const notaFiscal = String(linha.NOTAFISCAL || '').trim();
+      if (!numeroEmpenho) { comErro++; continue; }
+      const chave = chaveDespesa({ numeroEmpenho, parcela, notaFiscal });
+      if (chavesExistentes.has(chave)) { duplicadas++; continue; }
+      try {
+        await addDoc(collection(db, 'entes', state.enteAtualId, 'emendas', state.editandoEmendaId, 'despesas'), {
+          numeroEmpenho, parcela, credorNome: String(linha.NOME || '').trim(), credorCnpj: String(linha.CNPJFORNECEDOR || '').trim(),
+          dotacaoOrcamentaria: String(linha.CFPRO || '').trim(), elementoDespesa: String(linha.CATEC || '').trim(),
+          unidadeOrcamentariaNome: String(linha.UNIDADENOME || '').trim(), unidadeOrcamentariaCodigo: String(linha.UNIDADE || '').trim(),
+          contaBancaria: String(linha.CONTAC || '').trim(), ordemPagamento: String(linha.ORDPG || '').trim(),
+          valorEmpenho: parseValorBR(linha.VALOREMPENHO), valorPago: parseValorBR(linha.VAPAG),
+          dataPagamento: parseDataBR(linha.DTLAN), historico: String(linha.HISTORICO || '').trim(),
+          contrato: String(linha.CONTRATO || '').trim(), notaFiscal, licitacaoModalidade: String(linha.LICMOD || '').trim(),
+          processoLicitatorio: String(linha.PROCLIC || '').trim(), ano: emenda?.exercicio || new Date().getFullYear(),
+          metasVinculadas: [], chaveImportacao: chave, origemImportacao: true,
+          documentoComprobatorioArquivo: null, documentoComprobatorioNome: null, documentoComprobatorioTipo: null,
+          observacoes: '', validadoPorControleInterno: false, criadoEm: serverTimestamp(), criadoPor: state.user.uid
+        });
+        chavesExistentes.add(chave);
+        criadas++;
+      } catch (err) { comErro++; }
+    }
+    log.textContent += `Concluído: ${criadas} despesa(s) importada(s), ${duplicadas} já existiam (ignoradas), ${comErro} com erro/sem empenho.\nAs metas físicas não vêm da planilha — vincule manualmente em cada despesa, se precisar.`;
+    toast(`Importação concluída: ${criadas} despesa(s) nova(s).`);
+    await carregarDespesas(state.editandoEmendaId);
+    await recomputeResumoFinanceiro(state.editandoEmendaId);
+  } catch (err) {
+    log.textContent += 'Erro: ' + err.message;
+  } finally {
+    $('dpImportarArquivo').value = '';
+  }
+});
 
 // ============================================================
 // CONFORMIDADE (visão geral do ente)
@@ -768,20 +1120,20 @@ function renderAcompanhamento() {
   const totais = lista.reduce((acc, e) => {
     const r = e.resumoExecucao || {};
     acc.previsto += e.valorTotal || 0; acc.empenhado += r.totalEmpenhado || 0;
-    acc.liquidado += r.totalLiquidado || 0; acc.pago += r.totalPago || 0;
+    acc.liquidado += r.totalLiquidado || 0; acc.pago += r.totalPago || 0; acc.receita += r.totalReceita || 0;
     return acc;
-  }, { previsto: 0, empenhado: 0, liquidado: 0, pago: 0 });
+  }, { previsto: 0, empenhado: 0, liquidado: 0, pago: 0, receita: 0 });
 
   $('acompCards').innerHTML = `
     <div class="card"><div class="kpi-label">Valor previsto</div><div class="kpi-value" style="font-size:17px;">${fmtBRL(totais.previsto)}</div></div>
+    <div class="card"><div class="kpi-label">Recebido (receita)</div><div class="kpi-value" style="font-size:17px;">${fmtBRL(totais.receita)}</div></div>
     <div class="card"><div class="kpi-label">Empenhado</div><div class="kpi-value" style="font-size:17px;">${fmtBRL(totais.empenhado)}</div></div>
-    <div class="card"><div class="kpi-label">Liquidado</div><div class="kpi-value" style="font-size:17px;">${fmtBRL(totais.liquidado)}</div></div>
-    <div class="card"><div class="kpi-label">Pago</div><div class="kpi-value" style="font-size:17px;">${fmtBRL(totais.pago)}</div><div class="kpi-sub">${totais.previsto > 0 ? Math.round(totais.pago / totais.previsto * 1000) / 10 : 0}% do previsto</div></div>`;
+    <div class="card"><div class="kpi-label">Liquidado/Pago</div><div class="kpi-value" style="font-size:17px;">${fmtBRL(totais.pago)}</div><div class="kpi-sub">${totais.previsto > 0 ? Math.round(totais.pago / totais.previsto * 1000) / 10 : 0}% do previsto</div></div>`;
 
   $('acompTbody').innerHTML = lista.map(e => {
     const r = e.resumoExecucao || {};
-    const meta = e.metaFisica || {};
-    const percMeta = (meta.quantidadePrevista > 0) ? Math.min(100, Math.round(((r.ultimaQuantidadeRealizada || 0) / meta.quantidadePrevista) * 1000) / 10) : null;
+    const metasResumo = r.metas || [];
+    const metaTexto = metasResumo.length ? `${metasResumo.filter(m => m.percentual >= 100).length}/${metasResumo.length} metas 100%` : '—';
     return `<tr>
       <td>${e.numeroEmenda || '—'} — ${(e.objeto || '').slice(0, 40)}</td>
       <td class="num">${fmtBRL(e.valorTotal)}</td>
@@ -790,11 +1142,11 @@ function renderAcompanhamento() {
       <td class="num">${fmtBRL(r.totalPago)}</td>
       <td class="num">${r.percFisicoAtual || 0}%</td>
       <td class="num">${r.percFinanceiroAtual || 0}%</td>
-      <td class="num">${percMeta === null ? '—' : percMeta + '%'}</td>
-      <td class="num">${r.qtdComDocumento || 0}/${r.qtdEtapas || 0}</td>
+      <td class="num">${metaTexto}</td>
+      <td class="num">${r.qtdComDocumento || 0}/${r.qtdDespesas || 0}</td>
     </tr>`;
   }).join('');
-  $('acompEmpty').style.display = lista.some(e => (e.resumoExecucao?.qtdEtapas || 0) > 0) ? 'none' : 'block';
+  $('acompEmpty').style.display = lista.some(e => (e.resumoExecucao?.qtdDespesas || 0) > 0) ? 'none' : 'block';
 }
 $('acompFiltroExercicio')?.addEventListener('change', renderAcompanhamento);
 
@@ -1037,12 +1389,22 @@ function preencherDadosEnteForm() {
   $('deMunicipio').value = d.municipio || ''; $('deUf').value = d.uf || '';
   $('deNomeRelatorio').value = d.nomeRelatorio || ''; $('deResponsavel').value = d.responsavelExecutivo || '';
   $('deControleInterno').value = d.controleInterno || '';
+  const drive = d.googleDrive || {};
+  $('deDriveClientId').value = drive.clientId || ''; $('deDriveFolderId').value = drive.folderId || '';
   const editavel = papelAtual() === 'admin';
   ['deNome', 'deEsfera', 'deMunicipio', 'deUf', 'deNomeRelatorio', 'deResponsavel', 'deControleInterno'].forEach(id => $(id).disabled = !editavel);
   $('deLogoFile').disabled = !editavel;
+  $('deDriveClientId').disabled = !editavel; $('deDriveFolderId').disabled = !editavel;
   $('btnSalvarDadosEnte').style.display = editavel ? '' : 'none';
   $('btnRemoverLogoEnte').style.display = editavel ? '' : 'none';
+  $('btnSalvarDrive').style.display = editavel ? '' : 'none';
 }
+$('btnSalvarDrive').addEventListener('click', async () => {
+  const googleDrive = { clientId: $('deDriveClientId').value.trim(), folderId: $('deDriveFolderId').value.trim() };
+  await updateDoc(doc(db, 'entes', state.enteAtualId), { googleDrive });
+  state.enteDados = { ...state.enteDados, googleDrive };
+  toast('Configuração do Google Drive salva!');
+});
 $('btnSalvarDadosEnte').addEventListener('click', async () => {
   const dados = {
     nome: $('deNome').value.trim(), esferaGoverno: $('deEsfera').value, municipio: $('deMunicipio').value.trim(),
@@ -1057,6 +1419,78 @@ $('btnSalvarDadosEnte').addEventListener('click', async () => {
   toast('Dados do ente salvos!');
   await carregarPerfilEEntes();
 });
+// ============================================================
+// GOOGLE DRIVE (anexo opcional de arquivos maiores, configurável por ente)
+// ============================================================
+// Usa o Google Identity Services (carregado sob demanda) pra pedir um
+// token OAuth com escopo "drive.file" — esse escopo só dá acesso aos
+// arquivos que o próprio app cria, nunca ao Drive inteiro da pessoa.
+// Não precisa de servidor: o upload vai direto do navegador pra API do
+// Google, usando a conta de quem estiver autorizando no momento.
+let googleTokenClient = null;
+let googleAccessToken = null;
+function carregarGis() {
+  return new Promise((resolve, reject) => {
+    if (window.google && window.google.accounts) { resolve(); return; }
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.onload = resolve;
+    s.onerror = () => reject(new Error('Não foi possível carregar o Google Identity Services (verifique sua conexão).'));
+    document.head.appendChild(s);
+  });
+}
+async function obterTokenGoogleDrive(clientId) {
+  await carregarGis();
+  return new Promise((resolve, reject) => {
+    try {
+      googleTokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: 'https://www.googleapis.com/auth/drive.file',
+        callback: (resp) => {
+          if (resp.error) { reject(new Error('Autorização do Google negada ou cancelada.')); return; }
+          googleAccessToken = resp.access_token;
+          resolve(resp.access_token);
+        }
+      });
+      googleTokenClient.requestAccessToken({ prompt: googleAccessToken ? '' : 'consent' });
+    } catch (e) { reject(new Error('Client ID do Google inválido ou domínio não autorizado.')); }
+  });
+}
+async function enviarParaGoogleDrive(file, clientId, folderId) {
+  const token = await obterTokenGoogleDrive(clientId);
+  const metadata = { name: file.name };
+  if (folderId) metadata.parents = [folderId];
+  const form = new FormData();
+  form.append('metadata', new Blob([JSON.stringify(metadata)], { type: 'application/json' }));
+  form.append('file', file);
+  const resp = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webViewLink,name', {
+    method: 'POST', headers: { Authorization: 'Bearer ' + token }, body: form
+  });
+  if (!resp.ok) throw new Error('Falha ao enviar o arquivo para o Google Drive (verifique a pasta e as permissões).');
+  const data = await resp.json();
+  // Torna o arquivo legível por link — necessário pra aparecer no Portal
+  // Público sem exigir login de quem está consultando.
+  try {
+    await fetch(`https://www.googleapis.com/drive/v3/files/${data.id}/permissions`, {
+      method: 'POST', headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ role: 'reader', type: 'anyone' })
+    });
+  } catch (e) { /* segue mesmo se não conseguir tornar público — link ainda funciona pra quem tem acesso à pasta */ }
+  return { link: data.webViewLink, nome: data.name };
+}
+// Escolhe automaticamente Drive (se o ente configurou) ou base64 (padrão).
+// Devolve sempre o mesmo formato de campos pra gravar no documento.
+async function processarAnexo(file) {
+  if (!file) return { documentoComprobatorioArquivo: null, documentoComprobatorioNome: null, documentoComprobatorioTipo: null, documentoDriveLink: null, documentoDriveNome: null };
+  const drive = state.enteDados.googleDrive;
+  if (drive && drive.clientId) {
+    const { link, nome } = await enviarParaGoogleDrive(file, drive.clientId, drive.folderId);
+    return { documentoComprobatorioArquivo: null, documentoComprobatorioNome: null, documentoComprobatorioTipo: null, documentoDriveLink: link, documentoDriveNome: nome };
+  }
+  const base64 = await lerArquivoComoBase64(file);
+  return { documentoComprobatorioArquivo: base64, documentoComprobatorioNome: file.name, documentoComprobatorioTipo: file.type, documentoDriveLink: null, documentoDriveNome: null };
+}
+
 function aplicarLogoSidebar() {
   const logo = state.enteDados.logo;
   const img = $('sidebarLogoEnte');
@@ -1068,13 +1502,13 @@ function aplicarLogoSidebar() {
 // ============================================================
 $('btnExportarXlsx').addEventListener('click', () => {
   const linhas = state.emendas.map(e => {
-    const r = e.resumoExecucao || {}; const meta = e.metaFisica || {};
+    const r = e.resumoExecucao || {}; const metas = e.metas || [];
     return {
       'Nº': e.numeroEmenda, 'Esfera': ESFERA_LABEL[e.esfera] || e.esfera, 'Exercício': e.exercicio,
       'Autor': e.autorEmenda, 'Partido/Unidade': e.partidoUnidade, 'Objeto': e.objeto, 'Valor Total': e.valorTotal,
       'Ato Normativo': e.atoNormativoOrcamentario, 'Órgão Executor': e.orgaoEntidadeExecutora,
       'Localidade Beneficiada': e.localidadeBeneficiada, 'Beneficiário Final': e.beneficiarioFinal,
-      'Meta Física': meta.descricao ? `${meta.descricao} (${meta.quantidadePrevista} ${meta.unidade || ''})` : '',
+      'Metas Físicas': metas.map(m => `${m.descricao} (${m.quantidadePrevista} ${m.unidade || ''})`).join('; '),
       'Empenhado': r.totalEmpenhado || 0, 'Liquidado': r.totalLiquidado || 0, 'Pago': r.totalPago || 0,
       '% Físico': r.percFisicoAtual || 0, '% Financeiro': r.percFinanceiroAtual || 0,
       'Conformidade Técnica (%)': calcPercent(quesitosEmenda(e)), 'Rastreabilidade (%)': calcPercent(quesitosRastreabilidade(e)),
@@ -1152,7 +1586,11 @@ async function initPortalPublico(enteId) {
       return true;
     });
     const r = (e) => e.resumoExecucao || {};
-    const m = (e) => e.metaFisica || {};
+    const metasHtml = (e) => {
+      const resumoMetas = (r(e).metas && r(e).metas.length) ? r(e).metas : (e.metas || []).map(m => ({ ...m, quantidadeRealizada: 0, percentual: 0 }));
+      if (!resumoMetas.length) return '—';
+      return resumoMetas.map(m => `${m.descricao}: ${m.quantidadeRealizada || 0} de ${m.quantidadePrevista} ${m.unidade || ''} (${m.percentual || 0}%)`).join('<br>');
+    };
     $('portalLista').innerHTML = lista.length ? lista.map(e => `
       <div class="publico-emenda">
         <h3>${e.numeroEmenda || '—'} — ${e.objeto || 'Sem objeto informado'}</h3>
@@ -1166,25 +1604,49 @@ async function initPortalPublico(enteId) {
           <div><dt>Órgão executor</dt><dd>${e.orgaoEntidadeExecutora || '—'}</dd></div>
           <div><dt>Localidade beneficiada</dt><dd>${e.localidadeBeneficiada || '—'}</dd></div>
           <div><dt>Beneficiário final</dt><dd>${e.beneficiarioFinal || '—'}</dd></div>
+          <div><dt>Recebido (receita)</dt><dd>${fmtBRL(r(e).totalReceita)}</dd></div>
+          <div><dt>Empenhado</dt><dd>${fmtBRL(r(e).totalEmpenhado)}</dd></div>
+          <div><dt>Liquidado</dt><dd>${fmtBRL(r(e).totalLiquidado)}</dd></div>
+          <div><dt>Pago</dt><dd>${fmtBRL(r(e).totalPago)}</dd></div>
           <div><dt>Execução física</dt><dd>${r(e).percFisicoAtual || 0}%</dd></div>
-          <div><dt>Execução financeira</dt><dd>${r(e).percFinanceiroAtual || 0}% (${fmtBRL(r(e).totalPago)} pago)</dd></div>
-          <div><dt>Meta física</dt><dd>${m(e).descricao ? `${m(e).descricao}: ${r(e).ultimaQuantidadeRealizada || 0} de ${m(e).quantidadePrevista} ${m(e).unidade || ''}` : '—'}</dd></div>
+          <div><dt>Execução financeira</dt><dd>${r(e).percFinanceiroAtual || 0}%</dd></div>
+          <div><dt>Metas físicas</dt><dd>${metasHtml(e)}</dd></div>
         </dl>
-        <button class="btn btn-sm" style="margin-top:12px;" data-ver-exec="${e.id}">Ver histórico de execução e documentos</button>
+        <button class="btn btn-sm" style="margin-top:12px;" data-ver-exec="${e.id}">Ver despesas, receitas e documentos</button>
         <div id="portalExec-${e.id}" style="margin-top:10px;"></div>
       </div>`).join('') : '<div class="empty-state">Nenhuma emenda pública encontrada para este filtro.</div>';
 
     document.querySelectorAll('[data-ver-exec]').forEach(btn => btn.addEventListener('click', async () => {
       const alvo = $('portalExec-' + btn.dataset.verExec);
       if (alvo.dataset.carregado) { alvo.style.display = alvo.style.display === 'none' ? '' : 'none'; return; }
-      const snapExec = await getDocs(query(collection(db, 'entes', enteId, 'emendas', btn.dataset.verExec, 'execucoes'), orderBy('data', 'desc')));
-      const execs = snapExec.docs.map(d => d.data());
-      alvo.innerHTML = execs.length ? execs.map(x => `
+      const [despSnap, recSnap] = await Promise.all([
+        getDocs(query(collection(db, 'entes', enteId, 'emendas', btn.dataset.verExec, 'despesas'), orderBy('dataPagamento', 'desc'))),
+        getDocs(query(collection(db, 'entes', enteId, 'emendas', btn.dataset.verExec, 'receitas'), orderBy('data', 'desc'))),
+      ]);
+      const despesas = despSnap.docs.map(d => d.data());
+      const receitas = recSnap.docs.map(d => d.data());
+      const linkDoc = (x) => x.documentoComprobatorioArquivo
+        ? `<a href="${x.documentoComprobatorioArquivo}" download="${x.documentoComprobatorioNome || 'comprovante'}">📎 ${x.documentoComprobatorioNome || 'Comprovante'}</a>`
+        : (x.documentoDriveLink ? `<a href="${x.documentoDriveLink}" target="_blank" rel="noopener">📎 ${x.documentoDriveNome || 'Ver no Drive'}</a>` : '<span class="screen-sub">Sem documento anexado</span>');
+      const despesasHtml = despesas.length ? `<h4 style="font-size:12.5px; margin:10px 0 4px;">Despesas</h4>` + despesas.map(x => `
         <div class="exec-item">
-          <div class="exec-item-head"><strong>${ETAPA_LABEL_PORTAL[x.etapa] || x.etapa} — ${fmtBRL(x.valor)}</strong>
+          <div class="exec-item-head"><strong>Empenho ${x.numeroEmpenho || '—'} — ${x.credorNome || '—'}</strong>
+            <span class="screen-sub">${x.dataPagamento ? new Date(x.dataPagamento + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</span></div>
+          <div class="screen-sub">Empenhado: ${fmtBRL(x.valorEmpenho)} · Liquidado/Pago: ${fmtBRL(x.valorPago)}</div>
+          <div class="screen-sub">CNPJ: ${x.credorCnpj || '—'} · NF: ${x.notaFiscal || '—'} · Contrato: ${x.contrato || '—'}</div>
+          <div class="screen-sub">Dotação: ${x.dotacaoOrcamentaria || '—'} · Elemento: ${x.elementoDespesa || '—'} · Unidade: ${x.unidadeOrcamentariaNome || '—'}</div>
+          <div class="screen-sub">Licitação: ${x.licitacaoModalidade || '—'} (processo ${x.processoLicitatorio || '—'})</div>
+          ${x.historico ? `<div class="screen-sub">${x.historico}</div>` : ''}
+          ${linkDoc(x)}
+        </div>`).join('') : '<div class="empty-state">Nenhuma despesa lançada ainda.</div>';
+      const receitasHtml = receitas.length ? `<h4 style="font-size:12.5px; margin:10px 0 4px;">Receitas</h4>` + receitas.map(x => `
+        <div class="exec-item">
+          <div class="exec-item-head"><strong>${fmtBRL(x.valor)}</strong>
             <span class="screen-sub">${x.data ? new Date(x.data + 'T00:00:00').toLocaleDateString('pt-BR') : ''}</span></div>
-          ${x.documentoComprobatorioArquivo ? `<a href="${x.documentoComprobatorioArquivo}" download="${x.documentoComprobatorioNome || 'comprovante'}">📎 ${x.documentoComprobatorioNome || 'Comprovante'}</a>` : '<span class="screen-sub">Sem documento anexado</span>'}
-        </div>`).join('') : '<div class="empty-state">Nenhuma etapa de execução lançada ainda.</div>';
+          ${x.origem ? `<div class="screen-sub">Origem: ${x.origem}</div>` : ''}
+          ${linkDoc(x)}
+        </div>`).join('') : '';
+      alvo.innerHTML = despesasHtml + receitasHtml;
       alvo.dataset.carregado = '1';
     }));
   }
@@ -1193,4 +1655,3 @@ async function initPortalPublico(enteId) {
   $('portalBusca').addEventListener('input', render);
   render();
 }
-const ETAPA_LABEL_PORTAL = { empenho: 'Empenho', liquidacao: 'Liquidação', pagamento: 'Pagamento' };

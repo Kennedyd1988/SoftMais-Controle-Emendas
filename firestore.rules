@@ -139,7 +139,7 @@ service cloud.firestore {
         allow delete: if podeEditarAba(enteId, 'emendas') &&
           !exercicioBloqueado(enteId, resource.data.exercicio);
 
-        match /execucoes/{execId} {
+        match /despesas/{despesaId} {
           allow read: if temAcessoLeitura(enteId, 'execucao') ||
             get(/databases/$(database)/documents/entes/$(enteId)/emendas/$(emendaId)).data.publicoTransparencia == true;
           allow create: if podeEditarAba(enteId, 'execucao') &&
@@ -151,6 +151,18 @@ service cloud.firestore {
               !exercicioBloqueado(enteId, request.resource.data.ano))
             || (isControleInterno(enteId) &&
               request.resource.data.diff(resource.data).affectedKeys().hasOnly(['validadoPorControleInterno','validadoPor','validadoEm']));
+          allow delete: if podeEditarAba(enteId, 'execucao') &&
+            !exercicioBloqueado(enteId, resource.data.ano);
+        }
+
+        match /receitas/{receitaId} {
+          allow read: if temAcessoLeitura(enteId, 'execucao') ||
+            get(/databases/$(database)/documents/entes/$(enteId)/emendas/$(emendaId)).data.publicoTransparencia == true;
+          allow create: if podeEditarAba(enteId, 'execucao') &&
+            !exercicioBloqueado(enteId, request.resource.data.ano);
+          allow update: if podeEditarAba(enteId, 'execucao') &&
+            !exercicioBloqueado(enteId, resource.data.ano) &&
+            !exercicioBloqueado(enteId, request.resource.data.ano);
           allow delete: if podeEditarAba(enteId, 'execucao') &&
             !exercicioBloqueado(enteId, resource.data.ano);
         }
