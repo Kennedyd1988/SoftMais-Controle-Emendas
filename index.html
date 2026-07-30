@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SOFT+ | Emendas Parlamentares</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0d4fc4">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="SOFT+ Emendas">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,500;8..60,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500;600&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf-autotable/3.8.2/jspdf.plugin.autotable.min.js"></script>
+<style>
+  :root{
+    --ink:#eef4fb; --surface:#ffffff; --surface-2:#eef5fc; --line:#d7e4f0;
+    --text:#0f2947; --text-dim:#5c7692; --text-faint:#93a8bc;
+    --green:#16875a; --green-dim:#e2f5ec;
+    --amber:#b3790f; --amber-dim:#fbedd4;
+    --red:#c73f3f; --red-dim:#fbe7e7;
+    --brand:#0d4fc4; --brand-dim:#e6eefc;
+    --cyan:#14b8ee;
+    --radius:10px;
+  }
+  *{box-sizing:border-box; margin:0; padding:0;}
+  body{
+    background:var(--ink); color:var(--text);
+    font-family:'Inter',sans-serif; font-size:14px; line-height:1.5;
+    min-height:100vh;
+  }
+  ::selection{background:var(--brand-dim);}
+  .num{font-family:'IBM Plex Mono',monospace; font-variant-numeric:tabular-nums; letter-spacing:-0.2px; text-align:right;}
+  h1,h2,h3,.serif{font-family:'Source Serif 4',serif;}
+  a{color:var(--brand);}
+  button{font-family:inherit; cursor:pointer;}
+  input,select,textarea{font-family:inherit; font-size:13.5px;}
+
+  #authScreen,#publicPortal{display:none; flex-direction:column; min-height:100vh; align-items:center; padding:24px;}
+  #authScreen.active,#publicPortal.active{display:flex;}
+  #authScreen{justify-content:center;}
+  #appShell{display:none; min-height:100vh;}
+  #appShell.active{display:flex;}
+
+  .auth-card{
+    width:100%; max-width:380px; background:var(--surface); border:1px solid var(--line);
+    border-radius:14px; padding:32px 28px; box-shadow:0 10px 40px rgba(15,41,71,.08);
+  }
+  .auth-brand{font-family:'Source Serif 4',serif; font-weight:600; font-size:24px; margin-bottom:2px;}
+  .auth-sub{color:var(--text-dim); font-size:13px; margin-bottom:24px;}
+  .field{margin-bottom:14px;}
+  .field label{display:block; font-size:12.5px; color:var(--text-dim); margin-bottom:5px;}
+  .field label .req{color:var(--red); margin-left:2px;}
+  .field input, .field select, .field textarea{
+    width:100%; padding:9px 11px; border:1px solid var(--line); border-radius:8px;
+    background:var(--surface-2); color:var(--text);
+  }
+  .field textarea{resize:vertical; min-height:60px;}
+  .field input:focus, .field select:focus, .field textarea:focus{outline:2px solid var(--brand-dim); border-color:var(--brand);}
+  .field input.input-error, .field select.input-error{border-color:var(--red); background:var(--red-dim);}
+  .field-hint{font-size:11.5px; color:var(--text-faint); margin-top:4px;}
+  .field-row{display:flex; gap:12px;}
+  .field-row .field{flex:1; min-width:0;}
+  .checkbox-row{display:flex; align-items:center; gap:8px; font-size:13px;}
+  .checkbox-row input{width:16px; height:16px; accent-color:var(--brand);}
+
+  .auth-actions{display:flex; flex-direction:column; gap:8px; margin-top:18px;}
+  .auth-toggle{text-align:center; font-size:12.5px; color:var(--text-dim); margin-top:16px;}
+  .auth-toggle button{background:none; border:none; color:var(--brand); font-weight:500;}
+  #authError{color:var(--red); font-size:12.5px; margin-top:10px; min-height:16px;}
+
+  #mobileTopbar{display:none;}
+
+  #sidebar{
+    width:230px; flex-shrink:0; background:var(--surface);
+    border-right:1px solid var(--line); padding:20px 14px;
+    display:flex; flex-direction:column; gap:4px;
+  }
+  .brand-mark{font-family:'Source Serif 4',serif; font-weight:600; font-size:18px; margin:0 8px 2px;}
+  .brand-sub{font-size:10.5px; color:var(--text-faint); margin:0 8px 16px; text-transform:uppercase; letter-spacing:.08em;}
+  .ente-switch{
+    margin:0 4px 18px; padding:9px 10px; background:var(--surface-2); border:1px solid var(--line);
+    border-radius:8px; font-size:12.5px; width:calc(100% - 8px);
+  }
+  .nav-btn{
+    display:flex; align-items:center; gap:10px; width:100%;
+    background:none; border:none; color:var(--text-dim);
+    padding:9px 10px; border-radius:8px; font-size:13.5px; text-align:left;
+  }
+  .nav-btn:hover{background:var(--surface-2); color:var(--text);}
+  .nav-btn.active{background:var(--brand-dim); color:var(--brand);}
+  .sidebar-foot{margin-top:auto; padding-top:14px; border-top:1px solid var(--line);}
+  .user-chip{display:flex; align-items:center; justify-content:space-between; gap:8px; padding:0 8px 10px; font-size:12px; color:var(--text-dim);}
+  .user-chip-info{display:flex; flex-direction:column; gap:4px; min-width:0;}
+  .user-chip-info span:first-child{overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .papel-badge{
+    display:inline-block; font-size:10.5px; padding:2px 7px; border-radius:99px;
+    background:var(--brand-dim); color:var(--brand); font-weight:500; width:fit-content;
+  }
+  .btn-sair{width:100%; padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--surface); color:var(--text-dim); font-size:12.5px;}
+
+  #main{flex:1; min-width:0; padding:26px 30px; overflow-y:auto; max-height:100vh;}
+  .screen{display:none;}
+  .screen.active{display:block;}
+  .screen-head{display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:20px; flex-wrap:wrap;}
+  .screen-title{font-family:'Source Serif 4',serif; font-weight:600; font-size:22px;}
+  .screen-sub{color:var(--text-dim); font-size:13px; margin-top:2px;}
+
+  .btn{padding:9px 16px; border-radius:8px; border:1px solid var(--line); background:var(--surface); color:var(--text); font-size:13.5px; font-weight:500;}
+  .btn:hover{background:var(--surface-2);}
+  .btn-primary{background:var(--brand); color:#fff; border-color:var(--brand);}
+  .btn-primary:hover{background:#0a3fa0;}
+  .btn-danger{background:var(--red-dim); color:var(--red); border-color:var(--red-dim);}
+  .btn-sm{padding:5px 10px; font-size:12px;}
+  .btn:disabled{opacity:.5; cursor:not-allowed;}
+
+  .card{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:18px;}
+  .cards-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:14px; margin-bottom:22px;}
+  .kpi-label{font-size:12px; color:var(--text-dim); margin-bottom:6px;}
+  .kpi-value{font-family:'IBM Plex Mono',monospace; font-size:26px; font-weight:600;}
+  .kpi-sub{font-size:11.5px; color:var(--text-faint); margin-top:4px;}
+
+  table{width:100%; border-collapse:collapse; font-size:13px;}
+  th{text-align:left; font-size:11.5px; text-transform:uppercase; letter-spacing:.04em; color:var(--text-faint); padding:8px 10px; border-bottom:1px solid var(--line);}
+  td{padding:10px; border-bottom:1px solid var(--line); vertical-align:top;}
+  tr:last-child td{border-bottom:none;}
+  .table-wrap{background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); overflow:hidden; overflow-x:auto;}
+  .empty-state{text-align:center; padding:40px 20px; color:var(--text-faint); font-size:13px;}
+
+  .badge{display:inline-block; font-size:11px; padding:2px 8px; border-radius:99px; font-weight:500;}
+  .badge-green{background:var(--green-dim); color:var(--green);}
+  .badge-amber{background:var(--amber-dim); color:var(--amber);}
+  .badge-red{background:var(--red-dim); color:var(--red);}
+  .badge-brand{background:var(--brand-dim); color:var(--brand);}
+
+  .toolbar{display:flex; gap:10px; margin-bottom:16px; flex-wrap:wrap; align-items:center;}
+  .toolbar input, .toolbar select{padding:8px 10px; border:1px solid var(--line); border-radius:8px; background:var(--surface); font-size:13px;}
+  .toolbar .grow{flex:1; min-width:160px;}
+
+  .modal-overlay{display:none; position:fixed; inset:0; background:rgba(15,41,71,.4); z-index:100; align-items:flex-start; justify-content:center; padding:40px 16px; overflow-y:auto;}
+  .modal-overlay.active{display:flex;}
+  .modal{background:var(--surface); border-radius:14px; max-width:560px; width:100%; padding:26px; box-shadow:0 20px 60px rgba(15,41,71,.2);}
+  .modal.modal-wide{max-width:760px;}
+  .modal-title{font-family:'Source Serif 4',serif; font-weight:600; font-size:18px; margin-bottom:4px;}
+  .modal-sub{color:var(--text-dim); font-size:12.5px; margin-bottom:18px;}
+  .modal-actions{display:flex; justify-content:flex-end; gap:8px; margin-top:20px;}
+
+  .toast{position:fixed; bottom:20px; left:50%; transform:translateX(-50%) translateY(20px); background:var(--text); color:#fff; padding:10px 18px; border-radius:8px; font-size:13px; opacity:0; pointer-events:none; transition:all .2s; z-index:200;}
+  .toast.active{opacity:1; transform:translateX(-50%) translateY(0);}
+  .toast.error{background:var(--red);}
+
+  .checklist{display:flex; flex-direction:column; gap:6px; margin-top:10px;}
+  .checklist-item{display:flex; align-items:center; gap:10px; padding:8px 10px; border-radius:8px; background:var(--surface-2); font-size:13px;}
+  .checklist-dot{width:9px; height:9px; border-radius:50%; flex-shrink:0;}
+  .dot-ok{background:var(--green);}
+  .dot-fail{background:var(--red);}
+  .dot-na{background:var(--text-faint);}
+  .conf-bar-track{height:8px; background:var(--surface-2); border-radius:99px; overflow:hidden; margin-top:8px;}
+  .conf-bar-fill{height:100%; background:var(--green); border-radius:99px;}
+
+  .cronograma-row, .instrumento-row{display:flex; gap:8px; margin-bottom:8px; align-items:flex-end;}
+  .cronograma-row .field, .instrumento-row .field{flex:1; margin-bottom:0;}
+  .exec-item{border:1px solid var(--line); border-radius:8px; padding:12px; margin-bottom:10px; background:var(--surface-2);}
+  .exec-item-head{display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;}
+
+  .publico-emenda{border:1px solid var(--line); border-radius:12px; padding:18px; margin-bottom:14px; background:var(--surface);}
+  .publico-emenda h3{font-size:16px; margin-bottom:8px;}
+  .publico-grid{display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:10px; font-size:13px;}
+  .publico-grid dt{color:var(--text-faint); font-size:11px; text-transform:uppercase; letter-spacing:.04em;}
+  .publico-grid dd{margin-top:2px;}
+  .portal-header{width:100%; max-width:920px; margin-bottom:24px; text-align:center;}
+  .portal-wrap{width:100%; max-width:920px;}
+
+  @media(max-width:860px){
+    #sidebar{display:none;}
+    #mobileTopbar{display:flex; align-items:center; justify-content:space-between; padding:14px 16px; background:var(--surface); border-bottom:1px solid var(--line); position:sticky; top:0; z-index:40;}
+    #main{padding:18px;}
+    #appShell.active{flex-direction:column;}
+    #sidebar.mobile-open{display:flex; position:fixed; inset:0 20% 0 0; z-index:50; height:100vh;}
+  }
+</style>
+</head>
+<body>
+
+<div id="toast" class="toast"></div>
+
+<!-- ===================== AUTH ===================== -->
+<div id="authScreen">
+  <div class="auth-card">
+    <div class="logo-row" style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+      <img src="logo-simbolo.png" style="width:34px;height:34px;">
+      <div>
+        <div class="auth-brand">SOFT+ Emendas</div>
+      </div>
+    </div>
+    <div class="auth-sub" id="authSubtitle">Controle de emendas parlamentares — entre na sua conta</div>
+
+    <div id="loginFields">
+      <div class="field"><label>E-mail<span class="req">*</span></label><input type="email" id="loginEmail"></div>
+      <div class="field"><label>Senha<span class="req">*</span></label><input type="password" id="loginSenha"></div>
+    </div>
+
+    <div id="signupFields" style="display:none;">
+      <div class="field"><label>Nome<span class="req">*</span></label><input type="text" id="signupNome"></div>
+      <div class="field"><label>E-mail<span class="req">*</span></label><input type="email" id="signupEmail"></div>
+      <div class="field"><label>Senha<span class="req">*</span></label><input type="password" id="signupSenha"></div>
+    </div>
+
+    <div id="authError"></div>
+
+    <div class="auth-actions">
+      <button class="btn btn-primary" id="btnAuthSubmit">Entrar</button>
+    </div>
+    <div class="auth-toggle">
+      <span id="authToggleText">Ainda não tem conta?</span>
+      <button id="btnAuthToggle">Criar conta</button>
+    </div>
+  </div>
+</div>
+
+<!-- ===================== PORTAL PÚBLICO ===================== -->
+<div id="publicPortal">
+  <div class="portal-header">
+    <img id="portalLogo" src="logo-horizontal.png" style="max-width:220px; margin-bottom:10px;">
+    <h1 class="serif" id="portalEnteNome" style="font-size:22px;">Portal de Transparência das Emendas Parlamentares</h1>
+    <p class="screen-sub" id="portalEnteSub"></p>
+  </div>
+  <div class="toolbar portal-wrap">
+    <select id="portalFiltroExercicio" class="grow"></select>
+    <select id="portalFiltroEsfera">
+      <option value="">Todas as esferas</option>
+      <option value="federal">Federal</option>
+      <option value="estadual">Estadual</option>
+      <option value="municipal">Municipal</option>
+    </select>
+    <input type="text" id="portalBusca" placeholder="Buscar por autor, objeto ou nº...">
+  </div>
+  <div id="portalLista" class="portal-wrap"></div>
+</div>
+
+<!-- ===================== APP ===================== -->
+<div id="appShell">
+  <div id="mobileTopbar">
+    <button class="btn btn-sm" id="btnMenuMobile">☰ Menu</button>
+    <strong style="font-family:'Source Serif 4',serif;">SOFT+ Emendas</strong>
+  </div>
+
+  <div id="sidebar">
+    <div class="brand-row" style="display:flex;align-items:center;margin:0 8px 2px;">
+      <img class="sidebar-logo" src="logo-simbolo.png" style="width:28px;height:28px;border-radius:8px;margin-right:8px;">
+      <div class="brand-mark">SOFT+ Emendas</div>
+    </div>
+    <div class="brand-sub">Controle de Emendas Parlamentares</div>
+
+    <img id="sidebarLogoEnte" style="display:none; width:100%; max-height:52px; object-fit:contain; margin:0 4px 10px;">
+    <select class="ente-switch" id="enteSwitch"></select>
+    <button class="nav-btn" id="btnNovoEnte" style="color:var(--brand);">+ Novo Ente</button>
+    <div style="height:10px;"></div>
+
+    <button class="nav-btn active" data-screen="painel">Painel</button>
+    <button class="nav-btn" data-screen="emendas" data-aba="emendas">Emendas</button>
+    <button class="nav-btn" data-screen="conformidade" data-aba="conformidade">Conformidade</button>
+    <button class="nav-btn" data-screen="acompanhamento" data-aba="acompanhamento">Acompanhamento</button>
+    <button class="nav-btn" data-screen="relatorios" data-aba="relatorios">Relatórios</button>
+    <button class="nav-btn" data-screen="exercicios" data-aba="exercicios">Exercícios Financeiros</button>
+    <button class="nav-btn" data-screen="usuarios" data-admin="1">Usuários</button>
+    <button class="nav-btn" data-screen="dadosEnte">Dados do Ente</button>
+    <button class="nav-btn" id="btnAbrirPortalPublico">Ver Portal Público ↗</button>
+
+    <div class="sidebar-foot">
+      <div class="user-chip">
+        <div class="user-chip-info">
+          <span id="sidebarUserNome">—</span>
+          <span class="papel-badge" id="sidebarPapel">—</span>
+        </div>
+      </div>
+      <button class="btn-sair" id="btnLogout">Sair</button>
+    </div>
+  </div>
+
+  <div id="main">
+
+    <!-- ---------- PAINEL ---------- -->
+    <div class="screen active" id="screen-painel">
+      <div class="screen-head">
+        <div>
+          <div class="screen-title">Painel</div>
+          <div class="screen-sub" id="painelSub">Visão geral do ente</div>
+        </div>
+      </div>
+      <div class="cards-grid" id="painelCards"></div>
+      <div class="card">
+        <h3 style="font-size:14px;margin-bottom:10px;">Conformidade por emenda</h3>
+        <div id="painelConformidadeResumo"></div>
+      </div>
+    </div>
+
+    <!-- ---------- EMENDAS (lista) ---------- -->
+    <div class="screen" id="screen-emendas">
+      <div class="screen-head">
+        <div>
+          <div class="screen-title">Emendas Parlamentares</div>
+          <div class="screen-sub">Cadastro, esfera, autoria e objeto</div>
+        </div>
+        <button class="btn btn-primary" id="btnNovaEmenda">+ Nova Emenda</button>
+      </div>
+      <div class="toolbar">
+        <input type="text" class="grow" id="emendasBusca" placeholder="Buscar por autor, objeto ou nº...">
+        <select id="emendasFiltroEsfera">
+          <option value="">Todas as esferas</option>
+          <option value="federal">Federal</option>
+          <option value="estadual">Estadual</option>
+          <option value="municipal">Municipal</option>
+        </select>
+        <select id="emendasFiltroExercicio"></select>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Nº</th><th>Esfera</th><th>Autor</th><th>Objeto</th><th>Valor</th><th>Conformidade</th><th></th>
+          </tr></thead>
+          <tbody id="emendasTbody"></tbody>
+        </table>
+        <div class="empty-state" id="emendasEmpty" style="display:none;">Nenhuma emenda cadastrada ainda.</div>
+      </div>
+    </div>
+
+    <!-- ---------- EMENDA (form + execução + conformidade) ---------- -->
+    <div class="screen" id="screen-emendaForm">
+      <div class="screen-head">
+        <div>
+          <div class="screen-title" id="emendaFormTitulo">Nova Emenda</div>
+          <div class="screen-sub">Preencha os campos exigidos pela Resolução 034/2025-TCE/RN</div>
+        </div>
+        <button class="btn" id="btnVoltarEmendas">← Voltar para a lista</button>
+      </div>
+
+      <div class="card" style="margin-bottom:18px;">
+        <div class="field-row">
+          <div class="field"><label>Esfera<span class="req">*</span></label>
+            <select id="fEsfera"><option value="federal">Federal</option><option value="estadual">Estadual</option><option value="municipal">Municipal</option></select>
+          </div>
+          <div class="field"><label>Exercício financeiro<span class="req">*</span></label><input type="number" id="fExercicio" placeholder="2026"></div>
+          <div class="field"><label>Nº/código da emenda<span class="req">*</span></label><input type="text" id="fNumeroEmenda"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Autor / parlamentar proponente<span class="req">*</span></label><input type="text" id="fAutorEmenda"></div>
+          <div class="field"><label>Partido / unidade do parlamentar<span class="req">*</span></label><input type="text" id="fPartidoUnidade"></div>
+        </div>
+        <div class="field"><label>Objeto da emenda (descrição detalhada)<span class="req">*</span></label><textarea id="fObjeto"></textarea></div>
+        <div class="field-row">
+          <div class="field"><label>Valor total alocado (R$)<span class="req">*</span></label><input type="number" step="0.01" id="fValorTotal"></div>
+          <div class="field"><label>Ato normativo orçamentário (LOA/crédito adicional)<span class="req">*</span></label><input type="text" id="fAtoNormativo" placeholder="Ex: LOA 2026, art. 12"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Órgão/entidade executora<span class="req">*</span></label><input type="text" id="fOrgaoExecutor"></div>
+          <div class="field"><label>Localidade beneficiada<span class="req">*</span></label><input type="text" id="fLocalidade" placeholder="Município/bairro/órgão beneficiado"></div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Beneficiário final<span class="req">*</span></label><input type="text" id="fBeneficiarioFinal" placeholder="Ex: Escola Municipal X / Associação Y / pessoa jurídica que recebe o recurso"></div>
+          <div class="field"><label>Prazo estimado de implementação</label><input type="date" id="fPrazoEstimado"></div>
+        </div>
+        <div class="field-hint" style="margin:-8px 0 14px;">O beneficiário final é quem recebe o recurso de fato — diferente da localidade (onde) e do órgão executor (quem executa).</div>
+
+        <div class="field">
+          <label>Meta física prevista</label>
+          <div class="field-row">
+            <div class="field"><input type="text" id="fMetaDescricao" placeholder="Descrição da meta (ex: rede de água, famílias atendidas)"></div>
+            <div class="field" style="max-width:140px;"><input type="number" step="0.01" id="fMetaQuantidade" placeholder="Quantidade"></div>
+            <div class="field" style="max-width:120px;"><input type="text" id="fMetaUnidade" placeholder="Unidade (m, un...)"></div>
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Cronograma físico-financeiro</label>
+          <div id="cronogramaLista"></div>
+          <button class="btn btn-sm" id="btnAddCronograma">+ Adicionar marco</button>
+        </div>
+
+        <div class="field">
+          <label>Instrumentos vinculados (convênio, contrato de repasse, termo de fomento, nº do processo)</label>
+          <div id="instrumentosLista"></div>
+          <button class="btn btn-sm" id="btnAddInstrumento">+ Adicionar instrumento</button>
+        </div>
+
+        <div class="checkbox-row" style="margin-top:10px;">
+          <input type="checkbox" id="fPublico">
+          <label for="fPublico">Publicar no Portal de Transparência (torna essa emenda visível ao público, sem login)</label>
+        </div>
+
+        <div class="modal-actions" style="justify-content:flex-start;">
+          <button class="btn btn-primary" id="btnSalvarEmenda">Salvar emenda</button>
+          <button class="btn btn-danger" id="btnExcluirEmenda" style="display:none;">Excluir</button>
+        </div>
+      </div>
+
+      <div class="card" id="cardConformidadeEmenda" style="display:none; margin-bottom:18px;">
+        <h3 style="font-size:14px;">Conformidade desta emenda (16 quesitos TCE-RN)</h3>
+        <div class="conf-bar-track"><div class="conf-bar-fill" id="confBarFill" style="width:0%"></div></div>
+        <div class="screen-sub" id="confResumoTexto" style="margin:8px 0 0;"></div>
+        <div class="checklist" id="checklistEmenda"></div>
+        <button class="btn btn-primary" id="btnEmitirCertidao" style="margin-top:14px; display:none;">Emitir Certidão de Regularidade (PDF)</button>
+      </div>
+
+      <div class="card" id="cardRastreabilidadeEmenda" style="display:none; margin-bottom:18px;">
+        <h3 style="font-size:14px;">Rastreabilidade (itens adicionais além dos 16 quesitos técnicos)</h3>
+        <div class="screen-sub" style="margin-top:2px;">Beneficiário final, metas, execução física/financeira e documentação — apontados no Acórdão, ainda fora do escopo técnico do levantamento original.</div>
+        <div class="checklist" id="checklistRastreabilidade"></div>
+        <div style="margin-top:14px;">
+          <div class="screen-sub" id="metaResumoTexto">Sem meta física cadastrada.</div>
+          <div class="conf-bar-track"><div class="conf-bar-fill" id="metaBarFill" style="width:0%; background:var(--cyan);"></div></div>
+        </div>
+      </div>
+
+      <div class="card" id="cardExecucao" style="display:none;">
+        <div class="screen-head" style="margin-bottom:10px;">
+          <h3 style="font-size:14px;">Execução físico-financeira</h3>
+          <button class="btn btn-sm btn-primary" id="btnNovaExecucao">+ Lançar etapa</button>
+        </div>
+        <div id="execucoesLista"></div>
+      </div>
+    </div>
+
+    <!-- ---------- CONFORMIDADE (visão geral) ---------- -->
+    <div class="screen" id="screen-conformidade">
+      <div class="screen-head">
+        <div>
+          <div class="screen-title">Conformidade</div>
+          <div class="screen-sub">Diagnóstico dos 16 quesitos da Resolução 034/2025-TCE/RN, por emenda</div>
+        </div>
+        <select id="conformidadeFiltroExercicio"></select>
+      </div>
+      <div class="cards-grid" id="conformidadeCards"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Emenda</th><th>Esfera</th><th>Atendimento</th><th></th></tr></thead>
+          <tbody id="conformidadeTbody"></tbody>
+        </table>
+        <div class="empty-state" id="conformidadeEmpty" style="display:none;">Nenhuma emenda cadastrada neste exercício.</div>
+      </div>
+    </div>
+
+    <!-- ---------- ACOMPANHAMENTO CONSOLIDADO ---------- -->
+    <div class="screen" id="screen-acompanhamento">
+      <div class="screen-head">
+        <div>
+          <div class="screen-title">Acompanhamento Consolidado</div>
+          <div class="screen-sub">Execução física e financeira de todas as emendas, num só lugar</div>
+        </div>
+        <select id="acompFiltroExercicio"></select>
+      </div>
+      <div class="cards-grid" id="acompCards"></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th>Emenda</th><th>Previsto</th><th>Empenhado</th><th>Liquidado</th><th>Pago</th>
+            <th>% Físico</th><th>% Financeiro</th><th>Meta atingida</th><th>Docs</th>
+          </tr></thead>
+          <tbody id="acompTbody"></tbody>
+        </table>
+        <div class="empty-state" id="acompEmpty" style="display:none;">Nenhuma emenda com execução lançada ainda.</div>
+      </div>
+    </div>
+
+    <!-- ---------- RELATÓRIOS ---------- -->
+    <div class="screen" id="screen-relatorios">
+      <div class="screen-head">
+        <div>
+          <div class="screen-title">Relatórios</div>
+          <div class="screen-sub">Exportação para auditoria e prestação de contas</div>
+        </div>
+      </div>
+      <div class="cards-grid">
+        <div class="card">
+          <h3 style="font-size:14px;margin-bottom:8px;">Exportar emendas (XLSX)</h3>
+          <p class="screen-sub" style="margin-bottom:12px;">Baixa todas as emendas do ente com todos os campos e o % de conformidade.</p>
+          <button class="btn btn-primary" id="btnExportarXlsx">Exportar XLSX</button>
+        </div>
+        <div class="card">
+          <h3 style="font-size:14px;margin-bottom:8px;">Relatório de conformidade (PDF)</h3>
+          <p class="screen-sub" style="margin-bottom:12px;">Gera um PDF no formato do levantamento do TCE-RN, com % por quesito.</p>
+          <button class="btn btn-primary" id="btnExportarPdfConformidade">Gerar PDF</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ---------- EXERCÍCIOS FINANCEIROS ---------- -->
+    <div class="screen" id="screen-exercicios">
+      <div class="screen-head">
+        <div>
+          <div class="screen-title">Exercícios Financeiros</div>
+          <div class="screen-sub">Bloqueio de exercício e declaração de inexistência de emendas</div>
+        </div>
+        <button class="btn btn-primary" id="btnNovoExercicio">+ Novo exercício</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Ano</th><th>Bloqueado</th><th>Declaração negativa</th><th></th></tr></thead>
+          <tbody id="exerciciosTbody"></tbody>
+        </table>
+        <div class="empty-state" id="exerciciosEmpty" style="display:none;">Nenhum exercício cadastrado.</div>
+      </div>
+    </div>
+
+    <!-- ---------- USUÁRIOS ---------- -->
+    <div class="screen" id="screen-usuarios">
+      <div class="screen-head">
+        <div>
+          <div class="screen-title">Usuários</div>
+          <div class="screen-sub">Quem tem acesso a este ente e o que pode fazer</div>
+        </div>
+        <button class="btn btn-primary" id="btnCadastrarUsuario">+ Cadastrar usuário</button>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Nome</th><th>E-mail</th><th>Papel</th><th></th></tr></thead>
+          <tbody id="usuariosTbody"></tbody>
+        </table>
+        <div class="empty-state" id="usuariosEmpty" style="display:none;">Nenhum usuário além de você.</div>
+      </div>
+      <div class="card" style="margin-top:14px;">
+        <h3 style="font-size:14px; margin-bottom:2px;">Convites pendentes</h3>
+        <div class="field-hint" style="margin-bottom:10px;">Aparece aqui quando a pessoa já tinha conta própria no app (nesse caso, o acesso libera sozinho quando ela entrar).</div>
+        <div id="convitesLista"></div>
+      </div>
+    </div>
+
+    <!-- ---------- DADOS DO ENTE ---------- -->
+    <div class="screen" id="screen-dadosEnte">
+      <div class="screen-head">
+        <div>
+          <div class="screen-title">Dados do Ente</div>
+          <div class="screen-sub">Informações institucionais e do portal público</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="logo-row" style="display:flex; align-items:center; gap:14px; margin-bottom:16px;">
+          <img class="logo-preview" id="deLogoPreview" style="width:64px;height:64px;border-radius:10px;border:1px solid var(--line);background:var(--surface-2);object-fit:cover;">
+          <div>
+            <input type="file" id="deLogoFile" accept="image/*">
+            <div class="field-hint" style="margin-top:6px;">PNG ou JPG — será redimensionada automaticamente. Aparece no portal público e na barra lateral. <button class="btn btn-sm" id="btnRemoverLogoEnte" type="button" style="margin-left:6px;">Remover logo</button></div>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Nome do ente<span class="req">*</span></label><input type="text" id="deNome"></div>
+          <div class="field"><label>Esfera<span class="req">*</span></label>
+            <select id="deEsfera"><option value="estadual">Governo Estadual</option><option value="municipal">Prefeitura Municipal</option></select>
+          </div>
+        </div>
+        <div class="field-row">
+          <div class="field"><label>Município (se municipal)</label><input type="text" id="deMunicipio"></div>
+          <div class="field"><label>UF</label><input type="text" id="deUf" maxlength="2" style="text-transform:uppercase;"></div>
+        </div>
+        <div class="field"><label>Nome para cabeçalho de relatórios</label><input type="text" id="deNomeRelatorio"></div>
+        <div class="field-row">
+          <div class="field"><label>Responsável do Poder Executivo</label><input type="text" id="deResponsavel"></div>
+          <div class="field"><label>Responsável pelo Controle Interno</label><input type="text" id="deControleInterno"></div>
+        </div>
+        <button class="btn btn-primary" id="btnSalvarDadosEnte">Salvar</button>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ===================== MODAIS ===================== -->
+
+<div class="modal-overlay" id="modalNovoEnte">
+  <div class="modal">
+    <div class="modal-title">Novo ente</div>
+    <div class="modal-sub">Governo do Estado ou uma Prefeitura Municipal. Você vira Administrador dele.</div>
+    <div class="field"><label>Nome do ente<span class="req">*</span></label><input type="text" id="neNome" placeholder="Ex: Prefeitura Municipal de Natal"></div>
+    <div class="field"><label>Esfera<span class="req">*</span></label>
+      <select id="neEsfera"><option value="municipal">Prefeitura Municipal</option><option value="estadual">Governo Estadual</option></select>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Município</label><input type="text" id="neMunicipio"></div>
+      <div class="field"><label>UF</label><input type="text" id="neUf" maxlength="2" value="RN" style="text-transform:uppercase;"></div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="btnCancelarNovoEnte">Cancelar</button>
+      <button class="btn btn-primary" id="btnSalvarNovoEnte">Criar ente</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalCadastrarUsuario">
+  <div class="modal">
+    <div class="modal-title">Cadastrar usuário</div>
+    <div class="modal-sub">Cria a conta na hora, sem depender de e-mail de verdade.</div>
+    <div class="field"><label>Nome<span class="req">*</span></label><input type="text" id="cuNome"></div>
+    <div class="field"><label>E-mail<span class="req">*</span></label><input type="email" id="cuEmail"></div>
+    <div class="field"><label>Senha temporária<span class="req">*</span></label>
+      <div style="display:flex;gap:8px;"><input type="text" id="cuSenha" style="flex:1;"><button class="btn btn-sm" id="btnGerarSenhaCu">Gerar</button></div>
+    </div>
+    <div class="field"><label>Papel<span class="req">*</span></label>
+      <select id="cuPapel">
+        <option value="admin">Administrador</option>
+        <option value="cadastrador">Cadastrador</option>
+        <option value="controleInterno">Controle Interno</option>
+        <option value="leitura">Leitura</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Abas liberadas</label>
+      <div class="abas-list" id="cuAbas" style="display:flex;flex-direction:column;gap:6px;">
+        <label class="checkbox-row"><input type="checkbox" value="emendas"> Emendas</label>
+        <label class="checkbox-row"><input type="checkbox" value="execucao"> Execução</label>
+        <label class="checkbox-row"><input type="checkbox" value="conformidade"> Conformidade</label>
+        <label class="checkbox-row"><input type="checkbox" value="acompanhamento"> Acompanhamento</label>
+        <label class="checkbox-row"><input type="checkbox" value="relatorios"> Relatórios</label>
+        <label class="checkbox-row"><input type="checkbox" value="exercicios"> Exercícios Financeiros</label>
+      </div>
+      <div class="field-hint">Painel e Dados do Ente ficam sempre visíveis. Usuários é exclusivo de Administrador.</div>
+    </div>
+    <div class="checkbox-row" style="margin-bottom:14px;">
+      <input type="checkbox" id="cuTrocarSenha" checked>
+      <label for="cuTrocarSenha">Pedir para a pessoa trocar a senha no primeiro acesso</label>
+    </div>
+    <div id="cuResultado" style="display:none; margin-top:10px; padding:10px; background:var(--green-dim); border-radius:8px; font-size:13px;"></div>
+    <div class="modal-actions">
+      <button class="btn" id="btnFecharCadastrarUsuario">Fechar</button>
+      <button class="btn btn-primary" id="btnSalvarCadastrarUsuario">Cadastrar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalExecucao">
+  <div class="modal">
+    <div class="modal-title">Lançar etapa de execução</div>
+    <div class="field"><label>Etapa<span class="req">*</span></label>
+      <select id="exEtapa"><option value="empenho">Empenho</option><option value="liquidacao">Liquidação</option><option value="pagamento">Pagamento</option></select>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>Data<span class="req">*</span></label><input type="date" id="exData"></div>
+      <div class="field"><label>Valor (R$)<span class="req">*</span></label><input type="number" step="0.01" id="exValor"></div>
+    </div>
+    <div class="field-row">
+      <div class="field"><label>% físico acumulado</label><input type="number" step="0.1" id="exPercFisico"></div>
+      <div class="field"><label>% financeiro acumulado</label><input type="number" step="0.1" id="exPercFinanceiro"></div>
+    </div>
+    <div class="field"><label>Quantidade realizada acumulada (meta física)</label><input type="number" step="0.01" id="exQtdRealizada" placeholder="Na mesma unidade da meta física da emenda"></div>
+    <div class="field"><label>Documento comprobatório</label>
+      <input type="file" id="exArquivo" accept="image/*,application/pdf">
+      <div class="field-hint">Anexado direto no cadastro (sem custo de armazenamento externo) — limite de ~600KB por arquivo.</div>
+      <div id="exArquivoAtual" class="field-hint"></div>
+    </div>
+    <div class="field"><label>Observações</label><textarea id="exObs"></textarea></div>
+    <div class="modal-actions">
+      <button class="btn" id="btnCancelarExecucao">Cancelar</button>
+      <button class="btn btn-primary" id="btnSalvarExecucao">Salvar etapa</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalConfirmar">
+  <div class="modal" style="max-width:400px;">
+    <div class="modal-title" id="confirmarTitulo">Confirmar</div>
+    <div class="modal-sub" id="confirmarTexto"></div>
+    <div class="modal-actions">
+      <button class="btn" id="btnConfirmarNao">Cancelar</button>
+      <button class="btn btn-danger" id="btnConfirmarSim">Confirmar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalNovoExercicio">
+  <div class="modal" style="max-width:360px;">
+    <div class="modal-title">Novo exercício financeiro</div>
+    <div class="field"><label>Ano<span class="req">*</span></label><input type="number" id="neoAno" placeholder="2026"></div>
+    <div class="modal-actions">
+      <button class="btn" id="btnCancelarNovoExercicio">Cancelar</button>
+      <button class="btn btn-primary" id="btnSalvarNovoExercicio">Criar</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalTrocarSenha">
+  <div class="modal" style="max-width:380px;">
+    <div class="modal-title">Defina uma nova senha</div>
+    <div class="modal-sub">Um administrador pediu que você troque a senha temporária antes de continuar.</div>
+    <div class="field"><label>Nova senha<span class="req">*</span></label><input type="password" id="novaSenhaObrigatoria"></div>
+    <div class="field"><label>Confirmar nova senha<span class="req">*</span></label><input type="password" id="novaSenhaObrigatoriaConfirmar"></div>
+    <div class="modal-actions">
+      <button class="btn btn-primary" id="btnSalvarNovaSenhaObrigatoria" style="width:100%;">Salvar nova senha</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="modalEditarUsuario">
+  <div class="modal">
+    <div class="modal-title">Editar usuário</div>
+    <div class="modal-sub" id="editUsuarioEmail"></div>
+    <p class="field-hint" id="editAvisoSelf" style="display:none; color:var(--amber); margin-bottom:12px;">
+      Você está editando sua própria conta — não é possível alterar seu próprio papel (evita ficar sem ninguém com acesso total ao ente).
+    </p>
+    <div class="field"><label>Nome<span class="req">*</span></label><input type="text" id="editFormNome"></div>
+    <div class="field"><label>Papel</label>
+      <select id="editFormPapel">
+        <option value="admin">Administrador</option>
+        <option value="cadastrador">Cadastrador</option>
+        <option value="controleInterno">Controle Interno</option>
+        <option value="leitura">Leitura</option>
+      </select>
+    </div>
+    <div class="field">
+      <label>Abas liberadas</label>
+      <div id="editFormAbas" style="display:flex;flex-direction:column;gap:6px;">
+        <label class="checkbox-row"><input type="checkbox" value="emendas"> Emendas</label>
+        <label class="checkbox-row"><input type="checkbox" value="execucao"> Execução</label>
+        <label class="checkbox-row"><input type="checkbox" value="conformidade"> Conformidade</label>
+        <label class="checkbox-row"><input type="checkbox" value="acompanhamento"> Acompanhamento</label>
+        <label class="checkbox-row"><input type="checkbox" value="relatorios"> Relatórios</label>
+        <label class="checkbox-row"><input type="checkbox" value="exercicios"> Exercícios Financeiros</label>
+      </div>
+    </div>
+    <div class="checkbox-row" style="margin-bottom:14px;">
+      <input type="checkbox" id="editFormTrocarSenha">
+      <label for="editFormTrocarSenha">Pedir para trocar a senha no próximo acesso</label>
+    </div>
+    <div class="field" style="border-top:1px solid var(--line); padding-top:14px;">
+      <label>Senha</label>
+      <div class="field-hint" style="margin-bottom:8px;">Por segurança, não é possível redefinir a senha de uma conta já existente direto por aqui — envie um e-mail de redefinição.</div>
+      <button class="btn btn-sm" id="btnResetSenhaUsuario" type="button">Enviar e-mail para redefinir senha</button>
+    </div>
+    <div class="modal-actions">
+      <button class="btn" id="btnCancelarEditarUsuario">Cancelar</button>
+      <button class="btn btn-primary" id="btnSalvarEditarUsuario">Salvar</button>
+    </div>
+  </div>
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>

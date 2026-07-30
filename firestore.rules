@@ -1,0 +1,165 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function logado() {
+      return request.auth != null;
+    }
+
+    function ehMembro(enteId) {
+      return logado() &&
+        exists(/databases/$(database)/documents/entes/$(enteId)/usuarios/$(request.auth.uid));
+    }
+
+    function membro(enteId) {
+      return get(/databases/$(database)/documents/entes/$(enteId)/usuarios/$(request.auth.uid)).data;
+    }
+
+    function papel(enteId) {
+      return membro(enteId).papel;
+    }
+
+    function isAdmin(enteId) {
+      return ehMembro(enteId) && papel(enteId) == 'admin';
+    }
+
+    function isControleInterno(enteId) {
+      return ehMembro(enteId) && papel(enteId) == 'controleInterno';
+    }
+
+    function abasDoMembro(enteId) {
+      return membro(enteId).abasPermitidas != null
+        ? membro(enteId).abasPermitidas
+        : ['emendas','execucao','conformidade','relatorios','exercicios'];
+    }
+
+    function temAcessoAba(enteId, aba) {
+      return isAdmin(enteId) || (ehMembro(enteId) && aba in abasDoMembro(enteId));
+    }
+
+    // Controle Interno sempre pode LER tudo (papel de fiscalização), mesmo
+    // que a aba não esteja marcada explicitamente na lista dele.
+    function temAcessoLeitura(enteId, aba) {
+      return temAcessoAba(enteId, aba) || isControleInterno(enteId);
+    }
+
+    function podeEditar(enteId) {
+      return ehMembro(enteId) && (papel(enteId) == 'admin' || papel(enteId) == 'cadastrador');
+    }
+
+    function podeEditarAba(enteId, aba) {
+      return temAcessoAba(enteId, aba) && podeEditar(enteId);
+    }
+
+    function conviteValido(enteId) {
+      return logado() &&
+        exists(/databases/$(database)/documents/entes/$(enteId)/convites/$(request.auth.token.email));
+    }
+
+    // Só quem criou o ente pode "se auto-adicionar" como membro sem convite
+    // — usado exclusivamente no bootstrap (logo após criar o ente, o
+    // próprio app cria o vínculo de admin para quem acabou de criá-lo).
+    // Sem essa checagem, qualquer usuário logado poderia se autoadicionar
+    // a QUALQUER ente já existente só por ainda não ter vínculo lá.
+    function criouEsteEnte(enteId) {
+      return exists(/databases/$(database)/documents/entes/$(enteId)) &&
+        get(/databases/$(database)/documents/entes/$(enteId)).data.criadoPor == request.auth.uid;
+    }
+
+    function exercicioBloqueado(enteId, ano) {
+      return ano != null &&
+        exists(/databases/$(database)/documents/entes/$(enteId)/exerciciosFinanceiros/$(ano)) &&
+        get(/databases/$(database)/documents/entes/$(enteId)/exerciciosFinanceiros/$(ano)).data.bloqueado == true;
+    }
+
+    // Perfil pessoal do usuário (nome/e-mail) — só o próprio dono lê/edita.
+    match /perfis/{uid} {
+      allow read, update, create: if logado() && request.auth.uid == uid;
+      allow delete: if logado();
+    }
+
+    // Índice: "em quais entes eu estou".
+    match /membrosIndice/{docId} {
+      allow read: if logado() && resource.data.uid == request.auth.uid;
+      allow create: if logado() && request.auth.uid == request.resource.data.uid &&
+        (
+          exists(/databases/$(database)/documents/entes/$(request.resource.data.enteId)/convites/$(request.auth.token.email)) ||
+          (criouEsteEnte(request.resource.data.enteId) && !exists(/databases/$(database)/documents/entes/$(request.resource.data.enteId)/usuarios/$(request.auth.uid)))
+        )
+        || isAdmin(request.resource.data.enteId);
+      allow update: if isAdmin(resource.data.enteId) ||
+        (logado() && resource.data.uid == request.auth.uid &&
+         request.resource.data.diff(resource.data).affectedKeys().hasOnly(['precisaTrocarSenha']));
+      allow delete: if logado() && (resource.data.uid == request.auth.uid || isAdmin(resource.data.enteId));
+    }
+
+    // Índice: "existe convite pendente pra mim".
+    match /convitesIndice/{docId} {
+      allow read: if logado() && resource.data.email == request.auth.token.email;
+      allow create: if isAdmin(request.resource.data.enteId);
+      allow delete: if logado() && (resource.data.email == request.auth.token.email || isAdmin(resource.data.enteId));
+    }
+
+    match /entes/{enteId} {
+      // Leitura liberada a qualquer membro E também ao público, mas o
+      // público só deve enxergar os campos institucionais (nome, esfera,
+      // município, logo) — nunca dados de usuários (essa é outra coleção).
+      allow read: if true;
+      allow create: if logado();
+      allow update: if isAdmin(enteId);
+      allow delete: if false;
+
+      match /usuarios/{uid} {
+        allow read: if ehMembro(enteId);
+        allow create: if logado() && request.auth.uid == uid &&
+          (conviteValido(enteId) || (criouEsteEnte(enteId) && !exists(/databases/$(database)/documents/entes/$(enteId)/usuarios/$(request.auth.uid))))
+          || isAdmin(enteId);
+        allow update: if isAdmin(enteId) ||
+          (logado() && request.auth.uid == uid &&
+           request.resource.data.diff(resource.data).affectedKeys().hasOnly(['precisaTrocarSenha']));
+        allow delete: if isAdmin(enteId) || (logado() && request.auth.uid == uid);
+      }
+
+      match /convites/{email} {
+        allow read: if isAdmin(enteId) || (logado() && request.auth.token.email == email);
+        allow write: if isAdmin(enteId);
+      }
+
+      // Emendas: leitura pública SOMENTE quando publicoTransparencia == true
+      // (é o que alimenta o Portal de Transparência sem exigir login).
+      // Membros com acesso à aba "emendas" leem tudo, publicado ou não.
+      match /emendas/{emendaId} {
+        allow read: if temAcessoLeitura(enteId, 'emendas') ||
+          resource.data.publicoTransparencia == true;
+        allow create: if podeEditarAba(enteId, 'emendas') &&
+          !exercicioBloqueado(enteId, request.resource.data.exercicio);
+        allow update: if podeEditarAba(enteId, 'emendas') &&
+          !exercicioBloqueado(enteId, resource.data.exercicio) &&
+          !exercicioBloqueado(enteId, request.resource.data.exercicio);
+        allow delete: if podeEditarAba(enteId, 'emendas') &&
+          !exercicioBloqueado(enteId, resource.data.exercicio);
+
+        match /execucoes/{execId} {
+          allow read: if temAcessoLeitura(enteId, 'execucao') ||
+            get(/databases/$(database)/documents/entes/$(enteId)/emendas/$(emendaId)).data.publicoTransparencia == true;
+          allow create: if podeEditarAba(enteId, 'execucao') &&
+            !exercicioBloqueado(enteId, request.resource.data.ano);
+          // Controle Interno pode atualizar SOMENTE o campo de validação,
+          // sem poder alterar o valor lançado por quem cadastrou.
+          allow update: if (podeEditarAba(enteId, 'execucao') &&
+              !exercicioBloqueado(enteId, resource.data.ano) &&
+              !exercicioBloqueado(enteId, request.resource.data.ano))
+            || (isControleInterno(enteId) &&
+              request.resource.data.diff(resource.data).affectedKeys().hasOnly(['validadoPorControleInterno','validadoPor','validadoEm']));
+          allow delete: if podeEditarAba(enteId, 'execucao') &&
+            !exercicioBloqueado(enteId, resource.data.ano);
+        }
+      }
+
+      match /exerciciosFinanceiros/{ano} {
+        allow read: if true;
+        allow write: if isAdmin(enteId);
+      }
+    }
+  }
+}
